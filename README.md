@@ -56,7 +56,9 @@ Without a session file on the command line, the menu lists the `*.txt` files of 
 choose from. If there are none, it lists every program of `bin/`, in alphabetical order.
 
 On Windows, the programs of `bin/` are the `.exe`, `.bat` and `.cmd` files (if two have the same
-name, `.exe` first, then `.bat`). A `.bat` file can wrap a script, e.g. `bin/task_a.bat`:
+name, `.exe` first, then `.bat`), and the `.py` files, under their full name, which the menu runs
+with Python (`py -3`, or `python` if there is no `py`). A `.bat` file can wrap a script, e.g.
+`bin/task_a.bat`:
 
 ```bat
 @echo off
@@ -204,7 +206,7 @@ The menu refuses to start, and says why, if:
 
 - the session file cannot be read, or lists no program;
 - a program is found in neither `bin/` nor the PATH (with the file and line). If `bin/` has a file of
-  that name that is not executable (on Windows: not a `.exe`, `.bat` or `.cmd`), the message says so;
+  that name that is not executable (on Windows: not a `.exe`, `.bat`, `.cmd` or `.py`), the message says so;
 - a line or `command_line_args.txt` has an unclosed quote (with the file and line);
 - there is no session file, no `sessions/*.txt` and no program in `bin/`.
 
