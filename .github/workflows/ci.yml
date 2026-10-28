@@ -1,0 +1,36 @@
+name: CI
+
+# On every push to main and every pull request: vet, test, and cross-compile
+# for Linux x86-64, Windows x86-64 and macOS arm64.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Cross-compile
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o /tmp/linux/ .
+          GOOS=windows GOARCH=amd64 go build -o /tmp/windows/ .
+          GOOS=darwin GOARCH=arm64 go build -o /tmp/darwin/ .

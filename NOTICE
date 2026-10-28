@@ -1,0 +1,24 @@
+session-menu — run the programs of a session, one after the other, from a terminal menu
+Copyright 2026 Christophe Pallier <christophe@pallier.org>
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It started as a copy of dbp-meg-menu, of DBP_MEG
+(https://github.com/digital-brain-project/DBP_MEG), by the same author and
+under the same license.
+
+--------------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------------
+
+The program depends on the following third-party software. Their licenses are
+distributed with each module's source.
+
+  github.com/rivo/tview ....................... MIT License
+  github.com/rivo/uniseg ...................... MIT License
+  github.com/gdamore/tcell/v2 ................. Apache License 2.0
+  github.com/gdamore/encoding ................. Apache License 2.0
+  github.com/lucasb-eyer/go-colorful .......... MIT License
+  golang.org/x/sys ............................ BSD 3-Clause License
+  golang.org/x/term ........................... BSD 3-Clause License
+  golang.org/x/text ........................... BSD 3-Clause License
