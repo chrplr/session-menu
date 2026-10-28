@@ -60,7 +60,9 @@ func TestRunPy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.Split(string(b), "\n"), []string{"-s", "007", "-title", "a b"}; !reflect.DeepEqual(got, want) {
+	// Python writes the lines with \r\n on Windows.
+	lines := strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+	if got, want := lines, []string{"-s", "007", "-title", "a b"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("task.py got %q (run as %q), want %q", got, cmd, want)
 	}
 	t.Logf("ran %q", cmd)
