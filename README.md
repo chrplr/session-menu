@@ -142,6 +142,31 @@ The menu refuses to start, and says why, if:
 
 ## Installing
 
+### Ready-to-run programs
+
+Each [release](https://github.com/chrplr/session-menu/releases) has an archive per system. Each
+archive holds the program, this README, LICENSE and NOTICE:
+
+| System | Archive |
+|---|---|
+| Linux (x86-64) | `session-menu_<version>_linux_amd64.tar.gz` |
+| Windows (x86-64) | `session-menu_<version>_windows_amd64.zip` |
+| macOS, Apple silicon (M1…) | `session-menu_<version>_macos_arm64.tar.gz` |
+| macOS, Intel | `session-menu_<version>_macos_amd64.tar.gz` |
+
+`SHA256SUMS` lists their checksums. Unpack the archive, and put `session-menu` (`session-menu.exe` on
+Windows) in a folder of the PATH, or run it with its path. It is a terminal program: start it from a
+terminal (on Windows, PowerShell or the Command Prompt), not by double-clicking it.
+
+On macOS, the program is not signed. If it was downloaded with a web browser, macOS refuses to run it
+("cannot be verified"). Remove the quarantine mark once:
+
+```
+xattr -d com.apple.quarantine session-menu
+```
+
+### With Go
+
 ```
 go install github.com/chrplr/session-menu@latest
 ```
@@ -151,7 +176,15 @@ or, from a copy of this repository:
 ```
 go build                     # session-menu (session-menu.exe on Windows)
 go test ./...
+./package.sh                 # the release archives, into dist/
 ```
+
+### Making a release
+
+Push a tag `v<major>.<minor>.<patch>`. The Release workflow (`.github/workflows/release.yml`) then
+tests the code and builds the archives with `package.sh`, and publishes them as a GitHub release.
+The programs print that version with `-version`. Run by hand from the Actions tab, the workflow
+builds the archives without publishing a release, and keeps them as an artifact of the run.
 
 ## License
 

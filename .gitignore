@@ -3,3 +3,4 @@
 .last_subject.txt
 session-menu-log.csv
 __pycache__/
+/dist/
