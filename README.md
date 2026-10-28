@@ -3,35 +3,38 @@
 A terminal menu to run the programs of a session, one after the other, with the same subject ID and
 the same arguments given to each of them. It works on Linux, Windows and macOS.
 
-```
-session-menu [-dir DIR] [SESSION_FILE]
-```
+Usage:
 
-It started as a copy of `dbp-meg-menu`, the menu of the
-[DBP_MEG](https://github.com/digital-brain-project/DBP_MEG) experiments, made independent of them.
+```
+session-menu [-dir DIR] [-print] [SESSION_FILE]
+```
 
 ## The project folder
 
-The menu works in a project folder: the current directory, or `DIR` with `-dir DIR`. It may hold:
+The menu works in a project folder: the current directory, or `DIR` with `-dir DIR`. The programs run
+in it, whatever folder the menu was started from. It may hold:
 
 | File or folder | Meaning |
 |---|---|
 | `bin/` | Programs, looked up before the PATH |
+| `sessions/` | Session files (`*.txt`), listed by the menu to choose from |
 | `command_line_args.txt` | Arguments given to every program (optional; see below) |
 | `.last_subject.txt` | The last subject ID, written by the menu |
 | `session-menu-log.csv` | The log of the runs, written by the menu (see below) |
 
-The session files can be anywhere, e.g. in `sessions/`:
-
 ```
 cd my-experiment
-session-menu sessions/sub-001_sess-01.txt
+session-menu                                  # choose a session of sessions/
+session-menu sessions/sub-001_sess-01.txt     # or open one directly
 ```
+
+A session file given on the command line can be anywhere. A relative path is looked for in the
+current folder, then in the project folder.
 
 ## Session files
 
-One command per line: a program, then its options. Blank lines and lines starting with `#` are
-ignored. The options are split as in a shell: quotes and backslashes work. A program may be listed
+A sesssion file is a simple text file, with one command per line: a program, then its options. 
+Blank lines and lines starting with `#` are ignored. The options are split as in a shell: quotes and backslashes work. A program may be listed
 several times.
 
 ```
@@ -49,7 +52,19 @@ MEG-ARC -run 2
 - If the file name starts with `sub-<ID>` (up to the first `_` or `.`), the Subject ID field is
   pre-filled with `<ID>`, as written (`sub-001` gives `001`).
 
-Without a session file, the menu lists every program of `bin/`, in alphabetical order.
+Without a session file on the command line, the menu lists the `*.txt` files of `sessions/` to
+choose from. If there are none, it lists every program of `bin/`, in alphabetical order.
+
+On Windows, the programs of `bin/` are the `.exe`, `.bat` and `.cmd` files (if two have the same
+name, `.exe` first, then `.bat`). A `.bat` file can wrap a script, e.g. `bin/task_a.bat`:
+
+```bat
+@echo off
+python "%~dp0task_a.py" %*
+```
+
+then `task_a` in a session line runs `task_a.py` with the common arguments and the options of the
+line.
 
 ## Arguments common to every program
 
@@ -84,19 +99,77 @@ of an option (as Go's `flag` package does) takes the line's value when an option
 Each PC can keep its own `command_line_args.txt`, with its monitor, its trigger device and so on,
 while the session files are shared.
 
+## Settings in a configuration file
+
+Settings shared by the programs (the lab, the viewing distance, the monitor, the trigger device…)
+can also go into a configuration file of the project, e.g. a TOML file `config.toml`:
+
+```toml
+# config.toml
+lab = "Example lab"
+screen_distance_cm = 60
+monitor = 1
+```
+
+This keeps the command lines short, and lets the settings have names, types and comments. But
+**`session-menu` does not read this file: each program must load and parse it itself**, whatever its
+language. So it only suits programs that you write or can change. Programs that you cannot change,
+such as `track`, still need their settings on the command line.
+
+- **Python** (3.11 or later) reads TOML with its standard library:
+
+  ```python
+  import tomllib
+
+  with open(config_path, "rb") as f:
+      config = tomllib.load(f)
+  distance = config["screen_distance_cm"]
+  ```
+
+- **Go** needs a package, e.g. [go-toml](https://github.com/pelletier/go-toml):
+
+  ```go
+  var config struct {
+      Lab              string  `toml:"lab"`
+      ScreenDistanceCm float64 `toml:"screen_distance_cm"`
+  }
+  b, err := os.ReadFile(configPath)
+  if err == nil {
+      err = toml.Unmarshal(b, &config)
+  }
+  ```
+
+The programs run in the project folder, so they can open `config.toml` by this relative path. A
+program that is also started without the menu can look for it from its own location instead, e.g. in
+the parent of `bin/`, as the [example project](project/README.md) does.
+
+The two approaches combine well:
+- `config.toml` holds the settings of the experiment;
+- `command_line_args.txt` holds what changes with each PC or each run, such as `-s {subject}`.
+
 ## Use
 
+- In the list of sessions, select one with the arrow keys and press Enter to open it.
 - Type the subject ID in the *Subject ID* field: anything without blanks. Press TAB to move to the
-  menu, and TAB again to come back to the field. Enter in the field also moves to the menu.
+  list of programs, and TAB again to come back to the field. Enter in the field also moves to the
+  list.
 - Select an entry with the arrow keys and press Enter to run it. The menu leaves the screen while the
   program runs, so its output goes to the terminal, and comes back when it ends.
 - The command line is printed before it runs.
 - When a program succeeds, the cursor moves to the next entry. When it fails, its exit code is shown
   and the menu waits for Enter, so that the output can be read.
+- Each entry shows the result of its last run for the Subject ID: `✓` for a success, `✗ exit 2` for
+  a failure (`✗ failed` if the program was killed, e.g. by Ctrl-C, or could not be started).
+  - The marks come from the log, so they are still there when the menu is restarted. When a session
+    opens, the cursor is on the first entry not done.
+  - Changing the Subject ID shows the marks of that subject.
+- For half a second after a program ends, the menu ignores the keyboard, so that an Enter pressed
+  twice to leave a program does not start the next one.
+- Esc goes back to the list of sessions. `q`, in a list, quits, as the *Quit* entry does.
 - Ctrl-C stops the running program, not the menu.
 - The programs also get the subject ID in the environment variable `SUBJECT`.
 
-The header shows the time, the subject and the common arguments.
+The header shows the project folder and the common arguments, and the bottom line the keys.
 
 The Subject ID field starts with the ID in the name of the session file, else the value of the
 environment variable `SUBJECT`, else the last subject used.
@@ -112,12 +185,13 @@ line, created by the first run:
 | `duration_s` | `end` − `start`, in seconds |
 | `exit_code` | The exit code of the program: 0 for success. −1 if it was killed by a signal (e.g. Ctrl-C) or could not be started |
 | `subject` | The Subject ID |
-| `session` | The session file, as given on the command line (empty without one) |
+| `session` | The session file: its path from the project folder if it is in it (`sessions/pilot.txt`), else its full path; empty without one |
 | `line` | The line of the session file (empty without one) |
 | `command` | The command line as it was run |
 
 `end` is taken when the program ends, before the menu waits for Enter after a failure. If the log
-cannot be written, the menu says so and goes on.
+cannot be written, the menu says so and goes on. The menu reads the log to mark the entries already
+run (see *Use*).
 
 ## Example
 
@@ -129,15 +203,20 @@ dummy Go program, which print their settings and arguments, and three session fi
 The menu refuses to start, and says why, if:
 
 - the session file cannot be read, or lists no program;
-- a program is found in neither `bin/` nor the PATH (with the file and line);
+- a program is found in neither `bin/` nor the PATH (with the file and line). If `bin/` has a file of
+  that name that is not executable (on Windows: not a `.exe`, `.bat` or `.cmd`), the message says so;
 - a line or `command_line_args.txt` has an unclosed quote (with the file and line);
-- there is no session file and `bin/` holds no program.
+- there is no session file, no `sessions/*.txt` and no program in `bin/`.
+
+A session chosen in the list of sessions with one of these errors is not opened: the menu shows the
+error.
 
 ## Options
 
 | Option | Meaning |
 |---|---|
 | `-dir DIR` | The project folder (default: the current directory) |
+| `-print` | Print the command lines of SESSION_FILE, with the Subject ID and the common arguments filled in, and exit: a check of a session, or of a new PC's `command_line_args.txt`. The Subject ID is the one the menu would start with; `SUBJECT=7 session-menu -print …` sets it (an ID in the file name still wins) |
 | `-version` | Print the version and exit |
 
 ## Installing

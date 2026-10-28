@@ -26,14 +26,15 @@ Build the Go task into `bin/`, then start the menu from the project folder:
 ```
 cd project
 go build -C go-task -o ../bin/ .
-session-menu sessions/sub-001_sess-01.txt
+session-menu
 ```
 
 (`go install github.com/chrplr/session-menu@latest` installs `session-menu`. From a copy of the
-repository you can instead run `go run .. sessions/sub-001_sess-01.txt` in this folder.)
+repository you can instead run `go run ..` in this folder.)
 
-The Subject ID field is pre-filled with `001`. Press TAB to move to the list, then Enter to run each
-program in turn. For example, the second line of `sub-001_sess-01.txt` runs:
+The menu lists the three sessions. Open `sub-001_sess-01`: the Subject ID field is pre-filled with
+`001`. Press TAB to move to the list, then Enter to run each program in turn. For example, the second
+line of `sub-001_sess-01.txt` runs:
 
 ```
 .../project/bin/go-task -s 001 -screen 1 -run 1
@@ -51,7 +52,15 @@ Press Enter to return to the menu...
 - a program that fails: the menu shows its exit code and keeps the cursor on it.
 
 Every run is appended to `session-menu-log.csv`, in this folder: when it started and ended, its exit
-code, the subject, the session file, its line, and the command. The file is not in git.
+code, the subject, the session file, its line, and the command. The file is not in git. From it, the
+menu marks each entry `✓` or `✗ exit 2`, also after it is restarted. Esc goes back to the list of
+sessions.
+
+To see what a session would run, without running it:
+
+```
+session-menu -print sessions/sub-001_sess-01.txt
+```
 
 ## The Python scripts
 
@@ -76,6 +85,7 @@ of them work from whatever folder the menu is started in.
 
 ## On Windows
 
-The menu only lists `.exe` files of `bin/` there, so `task_a.py` and `task_b.py` are not found.
-Write their lines as `!python bin\task_a.py -s {subject} …`. `echo`, in `pilot.txt`, is not a
-program on Windows either. `go-task.exe` works as on the other systems.
+The menu takes only the `.exe`, `.bat` and `.cmd` files of `bin/` there, so `task_a.py` and
+`task_b.py` are not found. Write their lines as `!python bin\task_a.py -s {subject} …`, or wrap each
+in a `.bat` file (see the main README) and name it without `.py` in the session files. `echo`, in
+`pilot.txt`, is not a program on Windows either. `go-task.exe` works as on the other systems.

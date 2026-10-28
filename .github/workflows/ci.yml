@@ -40,3 +40,19 @@ jobs:
         run: |
           go vet ./...
           go build -o ../bin/ .
+
+  windows:
+    # The tests on Windows, among them the run of a .bat of bin/
+    # (exec_windows_test.go).
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...

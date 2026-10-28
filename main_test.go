@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"errors"
 	"os"
@@ -55,6 +56,11 @@ func TestFindPrograms(t *testing.T) {
 	write(t, filepath.Join(dir, "a-prog"), "", 0o755)
 	write(t, filepath.Join(dir, "notes.txt"), "", 0o644)
 	write(t, filepath.Join(dir, "c-prog.exe"), "", 0o644)
+	// on Windows: .bat and .cmd too, .exe first, then .bat
+	write(t, filepath.Join(dir, "c-prog.bat"), "", 0o644)
+	write(t, filepath.Join(dir, "f-prog.CMD"), "", 0o644)
+	write(t, filepath.Join(dir, "f-prog.bat"), "", 0o644)
+	write(t, filepath.Join(dir, "g-prog.cmd"), "", 0o644)
 	write(t, filepath.Join(dir, "d-prog.app", "Contents", "MacOS", "d-prog"), "", 0o755)
 	write(t, filepath.Join(dir, "e-prog.app", "Contents", "Info.plist"), "", 0o644)
 
@@ -65,11 +71,15 @@ func TestFindPrograms(t *testing.T) {
 		paths map[string]string
 	}{
 		{"linux", []string{"a-prog", "b-prog"}, map[string]string{"a-prog": a, "b-prog": b}},
-		{"windows", []string{"c-prog"}, map[string]string{"c-prog": filepath.Join(dir, "c-prog.exe")}},
+		{"windows", []string{"c-prog", "f-prog", "g-prog"}, map[string]string{"c-prog": filepath.Join(dir, "c-prog.exe"),
+			"f-prog": filepath.Join(dir, "f-prog.bat"), "g-prog": filepath.Join(dir, "g-prog.cmd")}},
 		// executables, and .app bundles
 		{"darwin", []string{"a-prog", "b-prog", "d-prog"}, map[string]string{"a-prog": a, "b-prog": b,
 			"d-prog": filepath.Join(dir, "d-prog.app", "Contents", "MacOS", "d-prog")}},
 	} {
+		if tc.goos != "windows" && runtime.GOOS == "windows" {
+			continue // Windows files have no executable bit
+		}
 		names, paths := findPrograms(dir, tc.goos)
 		if !reflect.DeepEqual(names, tc.names) || !reflect.DeepEqual(paths, tc.paths) {
 			t.Errorf("%s: findPrograms = %q, %q; want %q, %q", tc.goos, names, paths, tc.names, tc.paths)
@@ -95,7 +105,7 @@ func TestReadSession(t *testing.T) {
 	session := filepath.Join(dir, "sub-001_sess-01.txt")
 
 	write(t, session, "# comment\n\nA\n  B -seed 2 \n!calib -n 9\n! track\nA\n", 0o644)
-	got, err := readSession(session, available, "progs", lookPath)
+	got, err := readSession(session, available, filepath.Join(dir, "progs"), lookPath, "linux")
 	want := []entry{
 		{line: "A", lineno: 3, prog: "A", args: []string{}, path: "/x/A"},
 		{line: "B -seed 2", lineno: 4, prog: "B", args: []string{"-seed", "2"}, path: "/x/B"},
@@ -107,14 +117,17 @@ func TestReadSession(t *testing.T) {
 		t.Errorf("readSession = %+v, %v; want %+v", got, err, want)
 	}
 
+	progs := filepath.Join(dir, "progs")
+	write(t, filepath.Join(progs, "task.py"), "", 0o644) // not executable
 	for content, msg := range map[string]string{
-		"A\nC -x\n":     ":2: 'C' not found in progs nor in the PATH",
+		"A\nC -x\n":     ":2: 'C' not found in " + progs + " nor in the PATH",
+		"task.py\n":     ":1: " + filepath.Join(progs, "task.py") + " exists but is not executable (chmod +x",
 		"# nothing\n\n": "no program listed",
 		"A 'unclosed\n": ":1: no closing quotation",
 		"A\n!\n":        ":2: no program after '!'",
 	} {
 		write(t, session, content, 0o644)
-		if _, err := readSession(session, available, "progs", lookPath); err == nil || !strings.Contains(err.Error(), msg) {
+		if _, err := readSession(session, available, progs, lookPath, "linux"); err == nil || !strings.Contains(err.Error(), msg) {
 			t.Errorf("readSession(%q): error %v, want %q", content, err, msg)
 		}
 	}
@@ -249,5 +262,135 @@ func TestAppendLog(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("log:\n%q\nwant\n%q", rows, want)
+	}
+}
+
+func TestNotFoundWindows(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "task.py"), "", 0o644)
+	if msg := notFound("task.py", dir, "windows"); !strings.Contains(msg, "is not a .exe, .bat or .cmd file") {
+		t.Errorf("notFound = %q", msg)
+	}
+}
+
+func TestListSessions(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"sub-002.txt", "pilot.TXT", "sub-001_sess-01.txt", "notes.md", ".hidden.txt"} {
+		write(t, filepath.Join(dir, name), "", 0o644)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "old.txt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range listSessions(dir) {
+		got = append(got, filepath.Base(p))
+	}
+	if want := []string{"pilot.TXT", "sub-001_sess-01.txt", "sub-002.txt"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("listSessions = %q, want %q", got, want)
+	}
+	if got := listSessions(filepath.Join(dir, "missing")); got != nil {
+		t.Errorf("missing folder: listSessions = %q", got)
+	}
+}
+
+func TestResolveSession(t *testing.T) {
+	cwd, root := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(cwd, "here.txt"), "", 0o644)
+	write(t, filepath.Join(root, "sessions", "s.txt"), "", 0o644)
+	write(t, filepath.Join(cwd, "both.txt"), "", 0o644)
+	write(t, filepath.Join(root, "both.txt"), "", 0o644)
+	for arg, want := range map[string]string{
+		"here.txt":                         filepath.Join(cwd, "here.txt"),
+		filepath.Join("sessions", "s.txt"): filepath.Join(root, "sessions", "s.txt"),
+		"both.txt":                         filepath.Join(cwd, "both.txt"), // the current folder first
+		"missing.txt":                      filepath.Join(cwd, "missing.txt"),
+		filepath.Join(root, "both.txt"):    filepath.Join(root, "both.txt"),
+	} {
+		if got := resolveSession(arg, cwd, root); got != want {
+			t.Errorf("resolveSession(%q) = %q, want %q", arg, got, want)
+		}
+	}
+}
+
+func TestSessionKey(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "project")
+	outside := filepath.Join(filepath.Dir(root), "elsewhere", "s.txt")
+	for path, want := range map[string]string{
+		filepath.Join(root, "sessions", "s.txt"):          "sessions/s.txt",
+		filepath.Join(root, "s.txt"):                      "s.txt",
+		outside:                                           outside,
+		filepath.Join(filepath.Dir(root), "project2.txt"): filepath.Join(filepath.Dir(root), "project2.txt"),
+		"": "",
+	} {
+		if got := sessionKey(path, root); got != want {
+			t.Errorf("sessionKey(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestPrintCommands(t *testing.T) {
+	entries := []entry{
+		{path: "/x/A", args: []string{"-run", "1"}},
+		{path: "/usr/bin/track", raw: true},
+		{path: "/x/B", args: []string{"-title", "a b"}},
+	}
+	var b bytes.Buffer
+	if err := printCommands(&b, entries, []string{"-s", "{subject}"}, "007"); err != nil {
+		t.Fatal(err)
+	}
+	want := "# subject: 007\n/x/A -s 007 -run 1\n/usr/bin/track\n/x/B -s 007 -title 'a b'\n"
+	if b.String() != want {
+		t.Errorf("printCommands:\n%s\nwant\n%s", b.String(), want)
+	}
+}
+
+func TestLoadMarks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), logFile)
+	if marks, err := loadMarks(path, "1", "sessions/a.txt"); err != nil || len(marks) != 0 {
+		t.Errorf("no log: loadMarks = %v, %v", marks, err)
+	}
+	t0 := time.Date(2026, 10, 28, 14, 0, 0, 0, time.UTC)
+	for _, r := range []struct {
+		code             int
+		subject, session string
+		line             int
+	}{
+		{0, "1", "sessions/a.txt", 3},
+		{2, "1", "sessions/a.txt", 4},
+		{0, "1", "sessions/a.txt", 4}, // the last run of line 4 wins
+		{-1, "1", "sessions/a.txt", 5},
+		{0, "2", "sessions/a.txt", 5}, // another subject
+		{0, "1", "sessions/b.txt", 6}, // another session
+		{0, "1", "", 0},               // a program of bin/
+	} {
+		if err := appendLog(path, result{t0, t0, r.code}, r.subject, r.session, r.line, []string{"/x/A"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marks, err := loadMarks(path, "1", "sessions/a.txt")
+	if want := map[int]int{3: 0, 4: 0, 5: -1}; err != nil || !reflect.DeepEqual(marks, want) {
+		t.Errorf("loadMarks = %v, %v; want %v", marks, err, want)
+	}
+	write(t, path, "start,end\n1,2\n", 0o644)
+	if _, err := loadMarks(path, "1", "sessions/a.txt"); err == nil {
+		t.Error("log without the needed columns: no error")
+	}
+}
+
+func TestMarkText(t *testing.T) {
+	e := entry{line: "task_b.py --fail [x]"}
+	for _, tc := range []struct {
+		code int
+		ran  bool
+		want string
+	}{
+		{0, false, "           3. task_b.py --fail [x[]"},
+		{0, true, "✓          3. task_b.py --fail [x[]"},
+		{2, true, "✗ exit 2   3. task_b.py --fail [x[]"},
+		{-1, true, "✗ failed   3. task_b.py --fail [x[]"},
+	} {
+		if got := markText(2, e, tc.code, tc.ran); got != tc.want {
+			t.Errorf("markText(%d, %v) = %q, want %q", tc.code, tc.ran, got, tc.want)
+		}
 	}
 }
