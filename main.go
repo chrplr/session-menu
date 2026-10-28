@@ -175,7 +175,11 @@ func main() {
 		}
 		var entries []entry
 		for _, name := range names {
-			entries = append(entries, entry{line: name, prog: name, path: paths[name]})
+			interp, err := interpreter(paths[name], runtime.GOOS, exec.LookPath)
+			if err != nil {
+				fatalf("%v", err)
+			}
+			entries = append(entries, entry{line: name, prog: name, path: paths[name], interp: interp})
 		}
 		m.openSession("", entries)
 	}

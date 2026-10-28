@@ -39,3 +39,29 @@ func TestRunBat(t *testing.T) {
 		t.Errorf("task.bat got %q, want %q", got, want)
 	}
 }
+
+// TestRunPy runs a .py of bin/ as the menu does, with the Python of this PC,
+// and checks the arguments it gets.
+func TestRunPy(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "bin")
+	write(t, filepath.Join(bin, "task.py"),
+		"import pathlib, sys\n"+
+			"pathlib.Path(__file__).with_name('out.txt').write_text('\\n'.join(sys.argv[1:]))\n", 0o644)
+	_, paths := findPrograms(bin, "windows")
+	interp, err := interpreter(paths["task.py"], "windows", exec.LookPath)
+	if err != nil {
+		t.Skip(err) // no Python on this PC
+	}
+	cmd := command(entry{path: paths["task.py"], interp: interp, args: []string{"-title", "a b"}}, []string{"-s", "{subject}"}, "007")
+	if out, err := exec.Command(cmd[0], cmd[1:]...).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %v\n%s", cmd, err, out)
+	}
+	b, err := os.ReadFile(filepath.Join(bin, "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Split(string(b), "\n"), []string{"-s", "007", "-title", "a b"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("task.py got %q (run as %q), want %q", got, cmd, want)
+	}
+	t.Logf("ran %q", cmd)
+}

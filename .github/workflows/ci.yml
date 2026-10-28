@@ -42,8 +42,9 @@ jobs:
           go build -o ../bin/ .
 
   windows:
-    # The tests on Windows, among them the run of a .bat of bin/
-    # (exec_windows_test.go).
+    # The tests on Windows, among them the runs of a .bat and of a .py of
+    # bin/ (exec_windows_test.go); -v shows whether the .py one was skipped
+    # for lack of Python.
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -55,4 +56,4 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        run: go test ./...
+        run: go test -v ./...

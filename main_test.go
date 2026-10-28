@@ -61,6 +61,8 @@ func TestFindPrograms(t *testing.T) {
 	write(t, filepath.Join(dir, "f-prog.CMD"), "", 0o644)
 	write(t, filepath.Join(dir, "f-prog.bat"), "", 0o644)
 	write(t, filepath.Join(dir, "g-prog.cmd"), "", 0o644)
+	// on Windows: Python scripts too, under their full name
+	write(t, filepath.Join(dir, "h-prog.py"), "", 0o644)
 	write(t, filepath.Join(dir, "d-prog.app", "Contents", "MacOS", "d-prog"), "", 0o755)
 	write(t, filepath.Join(dir, "e-prog.app", "Contents", "Info.plist"), "", 0o644)
 
@@ -71,8 +73,9 @@ func TestFindPrograms(t *testing.T) {
 		paths map[string]string
 	}{
 		{"linux", []string{"a-prog", "b-prog"}, map[string]string{"a-prog": a, "b-prog": b}},
-		{"windows", []string{"c-prog", "f-prog", "g-prog"}, map[string]string{"c-prog": filepath.Join(dir, "c-prog.exe"),
-			"f-prog": filepath.Join(dir, "f-prog.bat"), "g-prog": filepath.Join(dir, "g-prog.cmd")}},
+		{"windows", []string{"c-prog", "f-prog", "g-prog", "h-prog.py"}, map[string]string{"c-prog": filepath.Join(dir, "c-prog.exe"),
+			"f-prog": filepath.Join(dir, "f-prog.bat"), "g-prog": filepath.Join(dir, "g-prog.cmd"),
+			"h-prog.py": filepath.Join(dir, "h-prog.py")}},
 		// executables, and .app bundles
 		{"darwin", []string{"a-prog", "b-prog", "d-prog"}, map[string]string{"a-prog": a, "b-prog": b,
 			"d-prog": filepath.Join(dir, "d-prog.app", "Contents", "MacOS", "d-prog")}},
@@ -267,8 +270,8 @@ func TestAppendLog(t *testing.T) {
 
 func TestNotFoundWindows(t *testing.T) {
 	dir := t.TempDir()
-	write(t, filepath.Join(dir, "task.py"), "", 0o644)
-	if msg := notFound("task.py", dir, "windows"); !strings.Contains(msg, "is not a .exe, .bat or .cmd file") {
+	write(t, filepath.Join(dir, "task.txt"), "", 0o644)
+	if msg := notFound("task.txt", dir, "windows"); !strings.Contains(msg, "is not a .exe, .bat, .cmd or .py file") {
 		t.Errorf("notFound = %q", msg)
 	}
 }
@@ -392,5 +395,65 @@ func TestMarkText(t *testing.T) {
 		if got := markText(2, e, tc.code, tc.ran); got != tc.want {
 			t.Errorf("markText(%d, %v) = %q, want %q", tc.code, tc.ran, got, tc.want)
 		}
+	}
+}
+
+func TestInterpreter(t *testing.T) {
+	path := filepath.Join("bin", "task_a.py")
+	inPath := func(names ...string) func(string) (string, error) {
+		return func(name string) (string, error) {
+			for _, n := range names {
+				if n == name {
+					return "/w/" + name, nil
+				}
+			}
+			return "", errors.New("not found")
+		}
+	}
+	for _, tc := range []struct {
+		name, path, goos string
+		lookPath         func(string) (string, error)
+		want             []string
+	}{
+		{"py launcher", path, "windows", inPath("py", "python"), []string{"/w/py", "-3"}},
+		{"python only", path, "windows", inPath("python"), []string{"/w/python"}},
+		{"upper-case .PY", filepath.Join("bin", "T.PY"), "windows", inPath("py"), []string{"/w/py", "-3"}},
+		{"not a .py", filepath.Join("bin", "t.exe"), "windows", inPath("py"), nil},
+		{"#! line elsewhere", path, "linux", inPath("py"), nil},
+	} {
+		got, err := interpreter(tc.path, tc.goos, tc.lookPath)
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: interpreter = %q, %v; want %q", tc.name, got, err, tc.want)
+		}
+	}
+	if _, err := interpreter(path, "windows", inPath()); err == nil || !strings.Contains(err.Error(), "neither py nor python") {
+		t.Errorf("no Python: error %v", err)
+	}
+}
+
+func TestReadSessionWindowsPy(t *testing.T) {
+	dir := t.TempDir()
+	session := filepath.Join(dir, "s.txt")
+	write(t, session, "task_a.py -run 1\n", 0o644)
+	available := map[string]string{"task_a.py": `C:\p\bin\task_a.py`}
+	lookPath := func(name string) (string, error) {
+		if name == "py" {
+			return `C:\Windows\py.exe`, nil
+		}
+		return "", errors.New("not found")
+	}
+	entries, err := readSession(session, available, "bin", lookPath, "windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := command(entries[0], []string{"-s", "{subject}"}, "001")
+	want := []string{`C:\Windows\py.exe`, "-3", `C:\p\bin\task_a.py`, "-s", "001", "-run", "1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("command = %q, want %q", got, want)
+	}
+	// Without Python, the session does not open.
+	if _, err := readSession(session, available, "bin", func(string) (string, error) { return "", errors.New("no") }, "windows"); err == nil ||
+		!strings.Contains(err.Error(), ":1: ") {
+		t.Errorf("no Python: error %v", err)
 	}
 }

@@ -64,8 +64,9 @@ session-menu -print sessions/sub-001_sess-01.txt
 
 ## The Python scripts
 
-They are in `bin/` and executable, with a `#!/usr/bin/env python3` line. So the menu finds them as
-programs, and they get the common arguments right after their name:
+They are in `bin/`. On Linux and macOS they are executable, with a `#!/usr/bin/env python3` line; on
+Windows the menu runs them with Python (see below). So the menu finds them as programs, and they get
+the common arguments right after their name:
 
 ```
 .../project/bin/task_a.py -s 001 -screen 1
@@ -73,11 +74,13 @@ programs, and they get the common arguments right after their name:
 
 A line such as `python3 bin/task_a.py` would get the common arguments right after `python3`, before
 the script name, where Python takes them as its own options. Write such a line with `!` and give the
-options yourself, as in `pilot.txt`:
+options yourself:
 
 ```
 !python3 bin/task_b.py -s {subject} --practice
 ```
+
+(`pilot.txt` has `!task_b.py -s {subject} --practice` instead, which works on every system.)
 
 The scripts read `config.toml` in the parent of their own folder, with Python's `tomllib` (Python
 3.11 or later). The Go task finds it in the same way, and `-config FILE` names another file. So all
@@ -85,7 +88,8 @@ of them work from whatever folder the menu is started in.
 
 ## On Windows
 
-The menu takes only the `.exe`, `.bat` and `.cmd` files of `bin/` there, so `task_a.py` and
-`task_b.py` are not found. Write their lines as `!python bin\task_a.py -s {subject} …`, or wrap each
-in a `.bat` file (see the main README) and name it without `.py` in the session files. `echo`, in
-`pilot.txt`, is not a program on Windows either. `go-task.exe` works as on the other systems.
+The menu runs the `.py` files of `bin/` with Python: the launcher `py` (as `py -3`), or `python` if
+there is no `py`. So `task_a.py` and `task_b.py` work as on the other systems, and the session files
+are the same. Python must be installed; the menu says so if neither `py` nor `python` is in the PATH.
+
+Build `go-task.exe` as on the other systems.

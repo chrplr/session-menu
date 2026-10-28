@@ -20,8 +20,10 @@ import (
 
 // findPrograms returns the sorted names of the programs in dir, and the path
 // of the executable to run for each of them. goos selects the layout:
-// windows: <name>.exe, .bat or .cmd (in that order of preference); others:
-// executable files, and on darwin also <name>.app bundles.
+// windows: <name>.exe, .bat or .cmd (in that order of preference), and
+// Python scripts under their full name (<name>.py, as on the other systems;
+// see interpreter); others: executable files, and on darwin also <name>.app
+// bundles.
 func findPrograms(dir, goos string) ([]string, map[string]string) {
 	paths := map[string]string{}
 	entries, err := os.ReadDir(dir)
@@ -31,6 +33,10 @@ func findPrograms(dir, goos string) ([]string, map[string]string) {
 	for _, e := range entries {
 		name, path := e.Name(), filepath.Join(dir, e.Name())
 		switch {
+		case goos == "windows" && strings.EqualFold(filepath.Ext(name), ".py"):
+			if !isFile(path) {
+				continue
+			}
 		case goos == "windows":
 			ext := strings.ToLower(filepath.Ext(name))
 			rank := slices.Index(windowsExts, ext)
@@ -77,7 +83,8 @@ type entry struct {
 	lineno int    // in the session file; 0 without one
 	prog   string
 	args   []string
-	path   string // executable to run
+	path   string   // executable to run
+	interp []string // what runs it, before it: Python for a .py on Windows
 	// the line started with '!': run as written, without the common arguments
 	raw bool
 }
@@ -116,6 +123,9 @@ func readSession(path string, available map[string]string, programsDir string,
 		e.prog, e.args = words[0], words[1:]
 		if exe, ok := available[e.prog]; ok {
 			e.path = exe
+			if e.interp, err = interpreter(exe, goos, lookPath); err != nil {
+				return nil, fmt.Errorf("%s:%d: %v", path, lineno, err)
+			}
 		} else if exe, err := lookPath(e.prog); err == nil {
 			e.path = exe
 		} else {
@@ -208,11 +218,12 @@ func splitArgs(line string) ([]string, error) {
 	return words, nil
 }
 
-// command returns the command line of e: its executable, the common
+// command returns the command line of e: its executable (after its
+// interpreter, if any), the common
 // arguments unless the line started with '!', then the options of the line,
 // with the placeholder replaced by subject.
 func command(e entry, common []string, subject string) []string {
-	cmd := []string{e.path}
+	cmd := append(slices.Clone(e.interp), e.path)
 	if !e.raw {
 		cmd = append(cmd, common...)
 	}
@@ -270,10 +281,26 @@ func notFound(prog, programsDir, goos string) string {
 	case !isFile(path):
 		return fmt.Sprintf("'%s' not found in %s nor in the PATH", prog, programsDir)
 	case goos == "windows":
-		return fmt.Sprintf("%s is not a .exe, .bat or .cmd file", path)
+		return fmt.Sprintf("%s is not a .exe, .bat, .cmd or .py file", path)
 	default:
 		return fmt.Sprintf("%s exists but is not executable (chmod +x %s)", path, path)
 	}
+}
+
+// interpreter returns what runs the program of bin/ at path, before it, on
+// goos: on Windows, which has no #! line, Python for a .py file (the
+// launcher py, else python, found with lookPath); nothing otherwise.
+func interpreter(path, goos string, lookPath func(string) (string, error)) ([]string, error) {
+	if goos != "windows" || !strings.EqualFold(filepath.Ext(path), ".py") {
+		return nil, nil
+	}
+	if py, err := lookPath("py"); err == nil {
+		return []string{py, "-3"}, nil
+	}
+	if python, err := lookPath("python"); err == nil {
+		return []string{python}, nil
+	}
+	return nil, fmt.Errorf("%s is a Python script, but neither py nor python is in the PATH", path)
 }
 
 // listSessions returns the session files of dir, the folder sessions/ of the

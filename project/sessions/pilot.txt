@@ -3,11 +3,11 @@
 
 # A line starting with '!' runs as written, without the common arguments;
 # {subject} is still replaced.
-!echo "Pilot of subject {subject}: check the screen and the keyboard"
+!task_a.py --message "Pilot of subject {subject}: check the screen and the keyboard"
 task_a.py --practice
-# Python run explicitly: the common arguments would land before the script
-# name, so give the options yourself.
-!python3 bin/task_b.py -s {subject} --practice
+# The options given here only: -s, but not the -screen of the common
+# arguments.
+!task_b.py -s {subject} --practice
 # task_b.py fails on purpose with --fail: the menu shows the exit code, waits
 # for Enter, and keeps the cursor on this line.
 task_b.py --fail
