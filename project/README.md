@@ -7,8 +7,7 @@ wait, the menu would come back at once and cover the output.
 ```
 project/
 ├── command_line_args.txt   arguments given to every program: -s {subject} -screen 1
-├── config.py               settings of the Python tasks
-├── config.toml             settings of the Go task
+├── config.toml             settings of the tasks
 ├── bin/
 │   ├── task_a.py           Python task A
 │   ├── task_b.py           Python task B (fails with --fail)
@@ -71,9 +70,9 @@ options yourself, as in `pilot.txt`:
 !python3 bin/task_b.py -s {subject} --practice
 ```
 
-The scripts find `config.py` in the parent of their own folder. The Go task finds `config.toml` in
-the same way, and `-config FILE` names another file. So both work from whatever folder the menu is
-started in.
+The scripts read `config.toml` in the parent of their own folder, with Python's `tomllib` (Python
+3.11 or later). The Go task finds it in the same way, and `-config FILE` names another file. So all
+of them work from whatever folder the menu is started in.
 
 ## On Windows
 

@@ -1,4 +1,5 @@
-# Settings of the Go task of this project (bin/go-task, built from go-task/).
+# Settings of the tasks of this project: the Python scripts bin/task_a.py and
+# bin/task_b.py, and the Go program bin/go-task (built from go-task/).
 
 lab = "Example lab"
 greeting = "Hello from"
