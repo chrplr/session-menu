@@ -1,0 +1,3 @@
+# built by: go build -C go-task -o ../bin/ .
+/bin/go-task
+/bin/go-task.exe

@@ -1,0 +1,4 @@
+# Given to every program of the sessions, right after its name, except on the
+# lines that start with '!'. {subject} is replaced by the Subject ID.
+-s {subject}
+-screen 1

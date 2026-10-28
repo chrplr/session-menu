@@ -14,10 +14,14 @@
 // after the program of every line, except the lines that start with '!',
 // which run as written. "{subject}" is replaced by the Subject ID, in that
 // file and in the session lines.
+//
+// Every run is appended to DIR/session-menu-log.csv: when it started and
+// finished, and its exit code.
 package main
 
 import (
 	"bufio"
+	"encoding/csv"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,6 +33,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +46,10 @@ const (
 	binDir      = "bin"
 	argsFile    = "command_line_args.txt"
 	subjectFile = ".last_subject.txt"
+	logFile     = "session-menu-log.csv"
+	// timeFormat is that of the times of the log: local time, to the
+	// millisecond, with the offset from UTC.
+	timeFormat = "2006-01-02T15:04:05.000-07:00"
 	// subjectVar is set to the Subject ID in the environment of the programs.
 	subjectVar = "SUBJECT"
 	// placeholder is replaced by the Subject ID in the command lines.
@@ -102,10 +111,11 @@ func isExecutable(path string) bool {
 }
 
 type entry struct {
-	line string // as listed in the menu
-	prog string
-	args []string
-	path string // executable to run
+	line   string // as listed in the menu
+	lineno int    // in the session file; 0 without one
+	prog   string
+	args   []string
+	path   string // executable to run
 	// the line started with '!': run as written, without the common arguments
 	raw bool
 }
@@ -129,7 +139,7 @@ func readSession(path string, available map[string]string, programsDir string,
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		e := entry{line: line}
+		e := entry{line: line, lineno: lineno}
 		if rest, ok := strings.CutPrefix(line, "!"); ok {
 			e.raw, line = true, strings.TrimSpace(rest)
 		}
@@ -316,9 +326,30 @@ func version() string {
 	return rev
 }
 
-// run runs cmd in the terminal and returns true if it succeeded. On failure,
-// it keeps the output on screen until the user has read it.
-func run(cmd []string) bool {
+// result is how a run went: when the program started and ended, and its exit
+// code.
+type result struct {
+	start, end time.Time
+	exitCode   int // -1: killed by a signal, or could not be started
+}
+
+// exitCode returns the exit code of a program whose run ended with err (from
+// exec.Cmd.Run): 0 on success, -1 if it was killed by a signal or could not
+// be started.
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode() // -1 for a signal
+	}
+	return -1
+}
+
+// run runs cmd in the terminal. On failure, it keeps the output on screen
+// until the user has read it; the end of the run is taken before that.
+func run(cmd []string) result {
 	fmt.Printf("\n%s\n", shellJoin(cmd))
 
 	// Ctrl-C stops the program, not the menu
@@ -328,9 +359,11 @@ func run(cmd []string) bool {
 
 	c := exec.Command(cmd[0], cmd[1:]...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	start := time.Now()
 	err := c.Run()
+	res := result{start: start, end: time.Now(), exitCode: exitCode(err)}
 	if err == nil {
-		return true
+		return res
 	}
 	name := filepath.Base(cmd[0])
 	var exitErr *exec.ExitError
@@ -344,12 +377,49 @@ func run(cmd []string) bool {
 	}
 	fmt.Print("\nPress Enter to return to menu...")
 	bufio.NewReader(os.Stdin).ReadString('\n')
-	return false
+	return res
+}
+
+// logHeader are the columns of the log.
+var logHeader = []string{"start", "end", "duration_s", "exit_code", "subject", "session", "line", "command"}
+
+// appendLog appends a run to the log at path, a CSV file created with its
+// header if it does not exist yet. lineno is the line of the session file (0
+// without one), and cmd the command line as it was run.
+func appendLog(path string, r result, subject, session string, lineno int, cmd []string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
+	w := csv.NewWriter(f)
+	if fi.Size() == 0 {
+		w.Write(logHeader)
+	}
+	line := ""
+	if lineno > 0 {
+		line = strconv.Itoa(lineno)
+	}
+	w.Write([]string{
+		r.start.Format(timeFormat), r.end.Format(timeFormat),
+		strconv.FormatFloat(r.end.Sub(r.start).Seconds(), 'f', 3, 64),
+		strconv.Itoa(r.exitCode), subject, session, line, shellJoin(cmd),
+	})
+	w.Flush()
+	if err := w.Error(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func main() {
-	dir := flag.String("dir", "", "project folder, with bin/, "+argsFile+" and "+subjectFile+
-		" (default: the current directory)")
+	dir := flag.String("dir", "", "project folder, with bin/, "+argsFile+", "+subjectFile+
+		" and "+logFile+" (default: the current directory)")
 	showVersion := flag.Bool("version", false, "print the version of this program and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [-dir DIR] [-version] [SESSION_FILE]\n\n"+
@@ -374,6 +444,7 @@ func main() {
 	}
 	programsDir := filepath.Join(root, binDir)
 	subjectPath := filepath.Join(root, subjectFile)
+	logPath := filepath.Join(root, logFile)
 
 	common, err := readArgsFile(filepath.Join(root, argsFile))
 	if err != nil {
@@ -393,7 +464,8 @@ func main() {
 	names, paths := findPrograms(programsDir, runtime.GOOS)
 	var programs []entry
 	title := "Session"
-	if session := flag.Arg(0); session != "" {
+	session := flag.Arg(0)
+	if session != "" {
 		programs, err = readSession(session, paths, programsDir, exec.LookPath)
 		if err != nil {
 			fatalf("%v", err)
@@ -463,16 +535,20 @@ func main() {
 		// Save to File (Persistence); don't stop if it can't be written
 		os.WriteFile(subjectPath, []byte(id), 0o644)
 
-		cmd := command(programs[index], common, id)
+		p := programs[index]
+		cmd := command(p, common, id)
 
 		// Leave the full screen so that the program's output goes to a
 		// normal terminal
-		ok := false
-		app.Suspend(func() { ok = run(cmd) })
+		var res result
+		app.Suspend(func() { res = run(cmd) })
 		info.SetText(header(id))
+		if err := appendLog(logPath, res, id, session, p.lineno, cmd); err != nil {
+			showError(fmt.Sprintf("Could not write the log: %v", err))
+		}
 
 		// Move the cursor to the next entry (stop before Quit), only on success
-		if ok && index < menu.GetItemCount()-2 {
+		if res.exitCode == 0 && index < menu.GetItemCount()-2 {
 			menu.SetCurrentItem(index + 1)
 		}
 	})

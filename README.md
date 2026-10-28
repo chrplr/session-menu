@@ -19,6 +19,7 @@ The menu works in a project folder: the current directory, or `DIR` with `-dir D
 | `bin/` | Programs, looked up before the PATH |
 | `command_line_args.txt` | Arguments given to every program (optional; see below) |
 | `.last_subject.txt` | The last subject ID, written by the menu |
+| `session-menu-log.csv` | The log of the runs, written by the menu (see below) |
 
 The session files can be anywhere, e.g. in `sessions/`:
 
@@ -99,6 +100,29 @@ The header shows the time, the subject and the common arguments.
 
 The Subject ID field starts with the ID in the name of the session file, else the value of the
 environment variable `SUBJECT`, else the last subject used.
+
+## Log
+
+Every run is appended to `session-menu-log.csv`, in the project folder. It is a CSV file with a header
+line, created by the first run:
+
+| Column | Meaning |
+|---|---|
+| `start`, `end` | When the program started and ended: local time to the millisecond, with the offset from UTC (`2026-10-28T19:54:43.955+01:00`) |
+| `duration_s` | `end` − `start`, in seconds |
+| `exit_code` | The exit code of the program: 0 for success. −1 if it was killed by a signal (e.g. Ctrl-C) or could not be started |
+| `subject` | The Subject ID |
+| `session` | The session file, as given on the command line (empty without one) |
+| `line` | The line of the session file (empty without one) |
+| `command` | The command line as it was run |
+
+`end` is taken when the program ends, before the menu waits for Enter after a failure. If the log
+cannot be written, the menu says so and goes on.
+
+## Example
+
+[project/](project/README.md) is a project folder to try the menu: two dummy Python scripts and a
+dummy Go program, which print their settings and arguments, and three session files.
 
 ## Errors
 

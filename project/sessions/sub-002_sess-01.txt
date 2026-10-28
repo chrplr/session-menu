@@ -1,0 +1,5 @@
+# Subject 002, session 1: the same programs in another order.
+go-task -run 1
+task_b.py --block 1
+go-task -run 2
+task_a.py

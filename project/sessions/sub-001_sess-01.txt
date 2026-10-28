@@ -1,0 +1,7 @@
+# Subject 001, session 1. The menu pre-fills the Subject ID with 001, from the
+# name of this file. Every program gets "-s 001 -screen 1" right after its
+# name, then the options of its line.
+task_a.py
+go-task -run 1
+task_b.py --block 1
+go-task -run 2

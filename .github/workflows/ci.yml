@@ -34,3 +34,9 @@ jobs:
           GOOS=linux GOARCH=amd64 go build -o /tmp/linux/ .
           GOOS=windows GOARCH=amd64 go build -o /tmp/windows/ .
           GOOS=darwin GOARCH=arm64 go build -o /tmp/darwin/ .
+
+      - name: Example project
+        working-directory: project/go-task
+        run: |
+          go vet ./...
+          go build -o ../bin/ .

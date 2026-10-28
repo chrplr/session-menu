@@ -4,12 +4,16 @@
 package main
 
 import (
+	"encoding/csv"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSplitArgs(t *testing.T) {
@@ -93,11 +97,11 @@ func TestReadSession(t *testing.T) {
 	write(t, session, "# comment\n\nA\n  B -seed 2 \n!calib -n 9\n! track\nA\n", 0o644)
 	got, err := readSession(session, available, "progs", lookPath)
 	want := []entry{
-		{line: "A", prog: "A", args: []string{}, path: "/x/A"},
-		{line: "B -seed 2", prog: "B", args: []string{"-seed", "2"}, path: "/x/B"},
-		{line: "!calib -n 9", prog: "calib", args: []string{"-n", "9"}, path: "/usr/bin/calib", raw: true},
-		{line: "! track", prog: "track", args: []string{}, path: "/x/track", raw: true}, // bin/ first
-		{line: "A", prog: "A", args: []string{}, path: "/x/A"},
+		{line: "A", lineno: 3, prog: "A", args: []string{}, path: "/x/A"},
+		{line: "B -seed 2", lineno: 4, prog: "B", args: []string{"-seed", "2"}, path: "/x/B"},
+		{line: "!calib -n 9", lineno: 5, prog: "calib", args: []string{"-n", "9"}, path: "/usr/bin/calib", raw: true},
+		{line: "! track", lineno: 6, prog: "track", args: []string{}, path: "/x/track", raw: true}, // bin/ first
+		{line: "A", lineno: 7, prog: "A", args: []string{}, path: "/x/A"},
 	}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("readSession = %+v, %v; want %+v", got, err, want)
@@ -193,5 +197,57 @@ func TestSubject(t *testing.T) {
 		if err := validSubject(id); (err == nil) != ok {
 			t.Errorf("validSubject(%q) = %v", id, err)
 		}
+	}
+}
+
+func TestExitCode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sh")
+	}
+	for script, want := range map[string]int{"exit 0": 0, "exit 3": 3, "kill -TERM $$": -1} {
+		if got := exitCode(exec.Command("sh", "-c", script).Run()); got != want {
+			t.Errorf("%q: exit code %d, want %d", script, got, want)
+		}
+	}
+	if got := exitCode(exec.Command(filepath.Join(t.TempDir(), "missing")).Run()); got != -1 {
+		t.Errorf("program not found: exit code %d, want -1", got)
+	}
+}
+
+func TestAppendLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), logFile)
+	start := time.Date(2026, 10, 28, 14, 30, 0, 0, time.FixedZone("CET", 3600))
+	runs := []struct {
+		r       result
+		session string
+		lineno  int
+		cmd     []string
+	}{
+		{result{start, start.Add(1500 * time.Millisecond), 0}, "sessions/sub-1.txt", 3, []string{"/x/A", "-s", "1"}},
+		// a command with a comma and quotes, and no session file
+		{result{start.Add(time.Minute), start.Add(time.Minute + 250*time.Millisecond), 2}, "", 0,
+			[]string{"/x/B", "-title", `a, "b"`}},
+	}
+	for _, r := range runs {
+		if err := appendLog(path, r.r, "1", r.session, r.lineno, r.cmd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		logHeader,
+		{"2026-10-28T14:30:00.000+01:00", "2026-10-28T14:30:01.500+01:00", "1.500", "0", "1", "sessions/sub-1.txt", "3", "/x/A -s 1"},
+		{"2026-10-28T14:31:00.000+01:00", "2026-10-28T14:31:00.250+01:00", "0.250", "2", "1", "", "", `/x/B -title 'a, "b"'`},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("log:\n%q\nwant\n%q", rows, want)
 	}
 }
