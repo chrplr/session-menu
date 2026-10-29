@@ -3,6 +3,8 @@
 A terminal menu to run the programs of a session, one after the other, with the same subject ID and
 the same arguments given to each of them. It works on Linux, Windows and macOS.
 
+Source code, releases and issues: <https://github.com/chrplr/session-menu>
+
 ![session-menu running the session sub-001_sess-01 of project_simple: the first two programs are done (✓), the cursor is on the third](images/screenshot.png)
 
 Usage:
