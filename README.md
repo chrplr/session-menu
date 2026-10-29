@@ -197,8 +197,12 @@ run (see *Use*).
 
 ## Example
 
-[project/](project/README.md) is a project folder to try the menu: two dummy Python scripts and a
-dummy Go program, which print their settings and arguments, and three session files.
+[project_simple/](project_simple/README.md) is a project folder to try the menu, with nothing to
+build: dummy bash and Python scripts, which print their arguments, and two session files (Linux and
+macOS).
+
+[project/](project/README.md) is a fuller one: two dummy Python scripts and a dummy Go program, which
+read their settings from `config.toml` and print them with their arguments, and three session files.
 
 ## Errors
 

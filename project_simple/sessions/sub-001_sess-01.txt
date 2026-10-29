@@ -1,0 +1,7 @@
+# Subject 001, session 1. The menu pre-fills the Subject ID with 001, from the
+# name of this file. Every program gets "-s 001" right after its name, then the
+# options of its line.
+check_setup.sh
+task.py --run 1
+task.py --run 2
+!questionnaire.sh {subject}

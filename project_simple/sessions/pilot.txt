@@ -1,0 +1,10 @@
+# A pilot session. The file name has no sub-<ID>, so type the Subject ID in
+# the menu (it starts with the last one used).
+check_setup.sh
+task.py --practice
+# task.py fails on purpose with --fail: the menu shows the exit code, waits for
+# Enter, and keeps the cursor on this line.
+task.py --run 1 --fail
+# A line starting with '!' runs as written, without the common arguments;
+# {subject} is still replaced.
+!questionnaire.sh {subject}
