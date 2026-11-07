@@ -25,6 +25,9 @@ import (
 // second Enter 0.05-0.3 s after the first did, in a test under tmux.
 const guard = 500 * time.Millisecond
 
+// clockTick is how often the timer is redrawn when nothing else happens.
+const clockTick = 30 * time.Second
+
 // run runs cmd in the folder dir, in the terminal. On failure, it keeps the
 // output on screen until the user has read it; the end of the run is taken
 // before that.
@@ -77,6 +80,25 @@ func markText(i int, e entry, code int, ran bool) string {
 	return tview.Escape(fmt.Sprintf("%-10s %d. %s", mark, i+1, e.line))
 }
 
+// timerText is the text of the timer, in HH:mm: the time elapsed, and, with a
+// limit (a whole number of minutes; 0: none), the time remaining. Elapsed time
+// rounds down and remaining time up, so that they add up to the limit; past
+// the limit, the time remaining is negative.
+func timerText(elapsed, limit time.Duration) string {
+	hhmm := func(minutes int) string { return fmt.Sprintf("%02d:%02d", minutes/60, minutes%60) }
+	done := int(elapsed / time.Minute)
+	text := "Elapsed " + hhmm(done)
+	if limit <= 0 {
+		return text
+	}
+	text += " | Remaining "
+	left := int(limit/time.Minute) - done
+	if left < 0 {
+		return text + "-" + hhmm(-left)
+	}
+	return text + hhmm(left)
+}
+
 // menu is the state of the terminal menu.
 type menu struct {
 	app   *tview.Application
@@ -86,7 +108,11 @@ type menu struct {
 	logPath     string   // the log of the runs
 	subjectPath string   // the last Subject ID
 	common      []string // the common arguments
-	header      string   // first line of every page
+	header      string   // second line of every page
+
+	started time.Time       // when the menu was launched
+	limit   time.Duration   // the planned duration of the session (0: none)
+	clock   *tview.TextView // the timer, first line of every page
 
 	// The session files of the picker (none: no picker), and how to read one.
 	sessions []string
@@ -108,7 +134,7 @@ type menu struct {
 	focus     tview.Primitive // what has the focus when the menu starts
 }
 
-func newMenu(root, logPath, subjectPath string, common []string, subjectID string) *menu {
+func newMenu(root, logPath, subjectPath string, common []string, subjectID string, limit time.Duration) *menu {
 	args := "(none: no " + argsFile + ")"
 	if len(common) > 0 {
 		args = shellJoin(common)
@@ -122,8 +148,17 @@ func newMenu(root, logPath, subjectPath string, common []string, subjectID strin
 		common:      common,
 		header:      fmt.Sprintf("Project: %s | Common args: %s", homeTilde(root), args),
 		subjectID:   subjectID,
+		started:     time.Now(),
+		limit:       limit,
+		clock:       tview.NewTextView().SetTextColor(tcell.ColorGreen),
 	}
 	m.app.SetInputCapture(m.keys)
+	// The timer is computed at every draw, so that it is right after a key
+	// or when a program returns, not only at a tick of runMenu.
+	m.app.SetBeforeDrawFunc(func(tcell.Screen) bool {
+		m.clock.SetText(timerText(time.Since(m.started), m.limit))
+		return false
+	})
 	return m
 }
 
@@ -139,10 +174,11 @@ func homeTilde(path string) string {
 	return path
 }
 
-// page frames the items of a page: the header at the top, the help line at
-// the bottom.
+// page frames the items of a page: the timer and the header at the top, the
+// help line at the bottom.
 func (m *menu) page(title, help string, items ...tview.Primitive) *tview.Flex {
 	f := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(m.clock, 1, 0, false).
 		AddItem(tview.NewTextView().SetText(m.header).SetTextColor(tcell.ColorGreen), 1, 0, false).
 		AddItem(nil, 1, 0, false)
 	for _, it := range items {
@@ -341,5 +377,14 @@ func (m *menu) setFocus(p tview.Primitive) {
 
 // runMenu runs the menu until Quit.
 func (m *menu) runMenu() error {
+	// Redraw for the timer when nothing else happens. Draw goes through the
+	// event loop, which waits while a program runs, so that a tick does not
+	// write over its output; ForceDraw would. After Quit, this goroutine stays
+	// blocked in Draw until the process exits, right after.
+	go func() {
+		for range time.Tick(clockTick) {
+			m.app.Draw()
+		}
+	}()
 	return m.app.SetRoot(m.pages, true).SetFocus(m.focus).Run()
 }

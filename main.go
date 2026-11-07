@@ -4,7 +4,7 @@
 // session-menu runs the programs of a session, one after the other, from a
 // terminal menu:
 //
-//	session-menu [-dir DIR] [-print] [SESSION_FILE]
+//	session-menu [-dir DIR] [-print] [-max-duration-min N] [SESSION_FILE]
 //
 // A session file lists one command per line: a program, then its options. A
 // program is looked up in DIR/bin, then in the PATH. Without SESSION_FILE,
@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"time"
 )
 
 const (
@@ -88,9 +89,11 @@ func main() {
 		" and "+logFile+"; the programs run in it (default: the current directory)")
 	printOnly := flag.Bool("print", false, "print the command lines of SESSION_FILE, with the Subject ID and "+
 		"the common arguments, and exit")
+	maxDuration := flag.Int("max-duration-min", 0, "planned duration of the session, in minutes: the menu shows "+
+		"the time remaining, and stops nothing when it is over (default: no limit)")
 	showVersion := flag.Bool("version", false, "print the version of this program and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [-dir DIR] [-print] [-version] [SESSION_FILE]\n\n"+
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [-dir DIR] [-print] [-max-duration-min N] [-version] [SESSION_FILE]\n\n"+
 			"SESSION_FILE: file listing the commands to run, one per line "+
 			"(default: choose one of DIR/sessions/*.txt, or, if there are none, all the programs of DIR/bin)\n\n",
 			filepath.Base(os.Args[0]))
@@ -104,6 +107,9 @@ func main() {
 	if flag.NArg() > 1 {
 		flag.Usage()
 		os.Exit(2)
+	}
+	if *maxDuration < 0 {
+		fatalf("-max-duration-min must not be negative: %d", *maxDuration)
 	}
 
 	cwd, err := os.Getwd()
@@ -159,7 +165,8 @@ func main() {
 		return
 	}
 
-	m := newMenu(root, filepath.Join(root, logFile), subjectPath, common, subjectID)
+	m := newMenu(root, filepath.Join(root, logFile), subjectPath, common, subjectID,
+		time.Duration(*maxDuration)*time.Minute)
 	if session != "" {
 		path := resolveSession(session, cwd, root)
 		entries, err := load(path)

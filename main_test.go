@@ -398,6 +398,29 @@ func TestMarkText(t *testing.T) {
 	}
 }
 
+func TestTimerText(t *testing.T) {
+	for _, tc := range []struct {
+		elapsed, limit time.Duration
+		want           string
+	}{
+		{0, 0, "Elapsed 00:00"},
+		{59 * time.Second, 0, "Elapsed 00:00"},
+		{time.Minute, 0, "Elapsed 00:01"},
+		{100*time.Hour + 5*time.Minute, 0, "Elapsed 100:05"},
+		{0, 90 * time.Minute, "Elapsed 00:00 | Remaining 01:30"},
+		{30 * time.Second, 90 * time.Minute, "Elapsed 00:00 | Remaining 01:30"},
+		{12 * time.Minute, 90 * time.Minute, "Elapsed 00:12 | Remaining 01:18"},
+		{90 * time.Minute, 90 * time.Minute, "Elapsed 01:30 | Remaining 00:00"},
+		{90*time.Minute + 30*time.Second, 90 * time.Minute, "Elapsed 01:30 | Remaining 00:00"},
+		{95 * time.Minute, 90 * time.Minute, "Elapsed 01:35 | Remaining -00:05"},
+		{100*time.Hour + 90*time.Minute, 90 * time.Minute, "Elapsed 101:30 | Remaining -100:00"},
+	} {
+		if got := timerText(tc.elapsed, tc.limit); got != tc.want {
+			t.Errorf("timerText(%v, %v) = %q, want %q", tc.elapsed, tc.limit, got, tc.want)
+		}
+	}
+}
+
 func TestInterpreter(t *testing.T) {
 	path := filepath.Join("bin", "task_a.py")
 	inPath := func(names ...string) func(string) (string, error) {

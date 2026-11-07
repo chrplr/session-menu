@@ -175,7 +175,11 @@ The two approaches combine well:
 - Ctrl-C stops the running program, not the menu.
 - The programs also get the subject ID in the environment variable `SUBJECT`.
 
-The header shows the project folder and the common arguments, and the bottom line the keys.
+The first line is a timer, in hours and minutes (HH:mm): the time since the menu was started, and,
+with `-max-duration-min`, the time remaining. Past that duration, the time remaining is negative; nothing
+is stopped. The timer is updated at least every 30 s, and is not on screen while a program runs.
+
+Below it, the header shows the project folder and the common arguments. The bottom line shows the keys.
 
 The Subject ID field starts with the ID in the name of the session file, else the value of the
 environment variable `SUBJECT`, else the last subject used.
@@ -227,6 +231,7 @@ error.
 |---|---|
 | `-dir DIR` | The project folder (default: the current directory) |
 | `-print` | Print the command lines of SESSION_FILE, with the Subject ID and the common arguments filled in, and exit: a check of a session, or of a new PC's `command_line_args.txt`. The Subject ID is the one the menu would start with; `SUBJECT=7 session-menu -print …` sets it (an ID in the file name still wins) |
+| `-max-duration-min N` | The planned duration of the session, in minutes: the menu also shows the time remaining (default: no limit). It only informs: nothing is stopped when the time is over |
 | `-version` | Print the version and exit |
 
 ## Installing
