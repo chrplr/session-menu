@@ -47,6 +47,15 @@ Things that span several files:
 - **Argument order is the contract:** executable, common arguments (skipped for `!` lines), then the
   line's options, with `{subject}` replaced everywhere. Programs that keep the last value of an option
   rely on the line's options coming last.
+- **`*.sh` session files are not interpreted.** `readScript` only finds the runs below the `# runs` comment.
+  To run one, `shellScript.text` gives the real shell the whole script with the other runs blanked, so
+  variables, quoting and line numbers behave as in standalone use. Don't parse shell in Go. The marker line
+  becomes a check that the settings kept the menu's `$SUBJECT`. `shownCommand` is what the terminal, the log
+  and `-print` show, never the generated text. Common arguments and `{subject}` do not apply.
+- **Sessions are checked before anything runs.** `load` in `main.go` does it, at launch for a session on
+  the command line and for every session of the picker, and again when one is opened. For a script,
+  `checkPrograms` runs the settings once, then `command -v` on the first word of each run. So `load` is
+  not free of side effects for `*.sh`.
 - **Marks are looked up by subject, session key and line number** (`lineno` in the session file).
   `sessionKey` makes the session path relative to the project folder, so marks survive moving the
   project. The programs of `bin/`, with no session file, have no line numbers: their marks last only as
@@ -77,8 +86,8 @@ These come from how tview v0.42.0 works, so recheck them after upgrading it:
 - `project1`: bash and Python scripts, nothing to build.
 - `project2`: adds a Go program and `config.toml`. `project2/go-task` is its own Go module, so the root
   `go test ./...` does not cover it; only the CI step above does.
-- `project3`: shell scripts and rig JSON files. It has no `*.txt` session files, and the READMEs do not
-  mention it.
+- `project3`: session files that are shell scripts, and rig JSON files. They call `uv run fmri-play`, which
+  is not in this repository, so to run them use a fake `uv` in the PATH.
 
 Renaming an example folder also means updating the READMEs, `working-directory` in `ci.yml`, and, for
 `project2`, the module path in `go-task/go.mod`.

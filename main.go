@@ -16,6 +16,10 @@
 // which run as written. "{subject}" is replaced by the Subject ID, in that
 // file and in the session lines. The programs run in DIR.
 //
+// A session file named *.sh is a shell script instead: the commands below its
+// line "# runs" are the entries of the menu, and each runs in the script's
+// shell, after the lines above that one. See readScript.
+//
 // Every run is appended to DIR/session-menu-log.csv: when it started and
 // finished, and its exit code. The menu marks the lines already run from it.
 package main
@@ -94,8 +98,8 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version of this program and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [-dir DIR] [-print] [-max-duration-min N] [-version] [SESSION_FILE]\n\n"+
-			"SESSION_FILE: file listing the commands to run, one per line "+
-			"(default: choose one of DIR/sessions/*.txt, or, if there are none, all the programs of DIR/bin)\n\n",
+			"SESSION_FILE: file listing the commands to run, one per line, or a shell script (*.sh) "+
+			"(default: choose one of DIR/sessions/*.txt and *.sh, or, if there are none, all the programs of DIR/bin)\n\n",
 			filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
 	}
@@ -140,6 +144,9 @@ func main() {
 
 	names, paths := findPrograms(programsDir, runtime.GOOS)
 	load := func(path string) ([]entry, error) {
+		if isScript(path) {
+			return readScript(path, root, exec.LookPath)
+		}
 		return readSession(path, paths, programsDir, exec.LookPath, runtime.GOOS)
 	}
 
@@ -178,7 +185,7 @@ func main() {
 		m.showPicker(sessions, load)
 	} else {
 		if len(names) == 0 {
-			fatalf("no session file, no %s/*.txt, and no program in %s", sessionsDir, programsDir)
+			fatalf("no session file, no %s/*.txt or *.sh, and no program in %s", sessionsDir, programsDir)
 		}
 		var entries []entry
 		for _, name := range names {

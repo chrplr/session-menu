@@ -7,15 +7,19 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // findPrograms returns the sorted names of the programs in dir, and the path
@@ -87,6 +91,183 @@ type entry struct {
 	interp []string // what runs it, before it: Python for a .py on Windows
 	// the line started with '!': run as written, without the common arguments
 	raw bool
+	// A run of a shell script: the script (nil otherwise), and how many lines
+	// of it the run takes, from lineno.
+	script *shellScript
+	nlines int
+}
+
+// shellScript is a session file that is a shell script (see readScript).
+type shellScript struct {
+	path   string
+	shell  string   // the executable that runs it
+	lines  []string // all of its lines
+	marker int      // the index of the line "# runs"
+}
+
+// runsMarker matches the comment before the runs of a script: "# runs", or
+// "# Runs, one per line", but not "# runs are 10 minutes".
+var runsMarker = regexp.MustCompile(`(?i)^#\s*runs\s*([:,].*)?$`)
+
+// isScript says whether the session file at path is a shell script.
+func isScript(path string) bool {
+	return strings.EqualFold(filepath.Ext(path), ".sh")
+}
+
+// scriptShell returns the name of the shell of a script from its first line:
+// that of its #! line (#!/bin/bash or #!/usr/bin/env bash), else sh.
+func scriptShell(first string) string {
+	rest, ok := strings.CutPrefix(first, "#!")
+	if !ok {
+		return "sh"
+	}
+	words := strings.Fields(rest)
+	if len(words) == 0 {
+		return "sh"
+	}
+	name := filepath.Base(words[0])
+	if name != "env" {
+		return name
+	}
+	for _, w := range words[1:] {
+		if !strings.HasPrefix(w, "-") && !strings.Contains(w, "=") {
+			return w
+		}
+	}
+	return "sh"
+}
+
+// runProgram finds the program of a run as written: its first word, after any
+// VAR=value. A word in quotes, or with $(...), does not match: such a run is
+// not checked.
+var runProgram = regexp.MustCompile(`^(?:[A-Za-z_]\w*=\S*\s+)*([\w./$\{\}:+-]+)(?:[\s;]|$)`)
+
+// scriptCheckTime is how long the lines above the marker may take when a
+// session is checked: more means that they hang.
+var scriptCheckTime = 30 * time.Second
+
+// checkPrograms runs the lines above the marker in folder dir, as a run would,
+// then looks for the program of each run, with the shell's own command -v. So
+// a PATH or a variable set in those lines counts, and so do the shell's
+// builtins, unlike with a lookup from Go. The lines above the marker failing
+// is an error too, since every run would fail in the same way. Only the first
+// word of each run is checked: "uv run task" needs uv, and task is not looked
+// for. A program made by an earlier run would be refused.
+func (s *shellScript) checkPrograms(runs []entry, dir string) error {
+	const missing = 97
+	lines := slices.Clone(s.lines[:s.marker])
+	for _, e := range runs {
+		if m := runProgram.FindStringSubmatch(e.line); m != nil {
+			lines = append(lines, fmt.Sprintf(
+				`p=$(command -v -- "%s") && { case "$p" in */*) [ -x "$p" ];; esac; } || { printf '\n%d\n'; exit %d; }`,
+				m[1], e.lineno, missing))
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), scriptCheckTime)
+	defer cancel()
+	c := exec.CommandContext(ctx, s.shell, "-c", strings.Join(lines, "\n"), s.path)
+	c.Dir = dir
+	c.Env = append(os.Environ(), subjectVar+"=session-menu-check") // the Subject ID may not be known yet
+	c.WaitDelay = time.Second                                      // a child that keeps the output open
+	out, err := c.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s: the lines above '# runs' did not end in %v", s.path, scriptCheckTime)
+	}
+	if exitCode(err) == missing {
+		// The last line of the output is the line of the run, unless those
+		// lines exited with this code themselves.
+		lineno, _ := strconv.Atoi(text[strings.LastIndexAny(text, "\n")+1:])
+		if i := slices.IndexFunc(runs, func(e entry) bool { return e.lineno == lineno }); i >= 0 {
+			return fmt.Errorf("%s:%d: program %s not found, or not executable (in the PATH, from %s)",
+				s.path, lineno, runProgram.FindStringSubmatch(runs[i].line)[1], dir)
+		}
+	}
+	return fmt.Errorf("%s: the lines above '# runs' failed (exit %d): %s", s.path, exitCode(err), text)
+}
+
+// readScript returns the runs of a session file that is a shell script, which
+// run in the folder dir: the lines after the marker (see runsMarker), except
+// blank lines and comments; a line that ends with a backslash continues on the
+// next. The menu does not interpret the script: see shellScript.text. So that
+// a run that cannot work is refused now and not during the session, each is
+// checked with the shell's -n, which runs nothing, then with checkPrograms.
+func readScript(path, dir string, lookPath func(string) (string, error)) ([]entry, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(b), "\n")
+	name := scriptShell(lines[0])
+	shell, err := lookPath(name)
+	if err != nil {
+		return nil, fmt.Errorf("%s is a shell script, but %s is not in the PATH", path, name)
+	}
+	marker := slices.IndexFunc(lines, func(line string) bool {
+		return runsMarker.MatchString(strings.TrimSpace(line))
+	})
+	if marker < 0 {
+		return nil, fmt.Errorf("%s: no line '# runs' above the commands to run", path)
+	}
+	s := &shellScript{path: path, shell: shell, lines: lines, marker: marker}
+	var runs []entry
+	for i := marker + 1; i < len(lines); {
+		if line := strings.TrimSpace(lines[i]); line == "" || strings.HasPrefix(line, "#") {
+			i++
+			continue
+		}
+		start := i
+		var parts []string
+		for {
+			rest, more := strings.CutSuffix(strings.TrimSpace(lines[i]), `\`)
+			parts = append(parts, strings.TrimSpace(rest))
+			i++
+			if !more || i == len(lines) {
+				break
+			}
+		}
+		e := entry{line: strings.Join(parts, " "), lineno: start + 1, script: s, nlines: i - start}
+		if out, err := exec.Command(shell, "-n", "-c", s.text(e, "x"), path).CombinedOutput(); err != nil {
+			why := strings.TrimSpace(string(out))
+			if why == "" {
+				why = err.Error()
+			}
+			return nil, fmt.Errorf("%s:%d: not a whole command for %s: %s", path, e.lineno, name, why)
+		}
+		runs = append(runs, e)
+	}
+	if len(runs) == 0 {
+		return nil, fmt.Errorf("%s: no command below the line '# runs'", path)
+	}
+	if err := s.checkPrograms(runs, dir); err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
+// text returns what the shell runs for the run e: the script, with the other
+// runs blank. So the lines above the marker set the variables of the run, as
+// when the script runs on its own, without "export", and the lines keep their
+// numbers in the messages of the shell. The marker becomes a check that those
+// lines kept the Subject ID: a plain SUBJECT=sub-01 would otherwise replace
+// the one of the menu, and the data would go under that subject. The trace
+// (set -x) shows the run with its values.
+func (s *shellScript) text(e entry, subject string) string {
+	lines := slices.Clone(s.lines)
+	id := shellQuote(subject)
+	lines[s.marker] = `[ "$SUBJECT" = ` + id + ` ] || { printf '%s\n' "session-menu: this script sets SUBJECT to $SUBJECT, ` +
+		`but the Subject ID is "` + id + `". Write SUBJECT=\${SUBJECT:-$SUBJECT} in it." >&2; exit 3; }`
+	first := e.lineno - 1
+	for i := s.marker + 1; i < len(lines); i++ {
+		if i < first || i >= first+e.nlines {
+			lines[i] = ""
+		}
+	}
+	lines[first] = "set -x; " + lines[first]
+	return strings.Join(lines, "\n")
 }
 
 // readSession returns the programs listed in a session file.
@@ -221,8 +402,13 @@ func splitArgs(line string) ([]string, error) {
 // command returns the command line of e: its executable (after its
 // interpreter, if any), the common
 // arguments unless the line started with '!', then the options of the line,
-// with the placeholder replaced by subject.
+// with the placeholder replaced by subject. A run of a shell script gets
+// neither: the common arguments would go right after its first word, as in
+// "uv -s 001 run task", and the script has $SUBJECT.
 func command(e entry, common []string, subject string) []string {
+	if e.script != nil {
+		return []string{e.script.shell, "-c", e.script.text(e, subject), e.script.path}
+	}
 	cmd := append(slices.Clone(e.interp), e.path)
 	if !e.raw {
 		cmd = append(cmd, common...)
@@ -234,13 +420,28 @@ func command(e entry, common []string, subject string) []string {
 	return cmd
 }
 
+// shownCommand is the command of e as the terminal, the log and -print show
+// it: for a run of a shell script, its line as written, not all of the script
+// that the shell gets.
+func shownCommand(e entry, common []string, subject string) string {
+	if e.script != nil {
+		return e.line
+	}
+	return shellJoin(command(e, common, subject))
+}
+
+// shellQuote quotes s for a POSIX shell.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // shellJoin joins words for display, quoting those that a shell would split
 // or that are empty.
 func shellJoin(words []string) string {
 	quoted := make([]string, len(words))
 	for i, w := range words {
 		if w == "" || strings.ContainsAny(w, " \t'\"\\") {
-			w = "'" + strings.ReplaceAll(w, "'", `'\''`) + "'"
+			w = shellQuote(w)
 		}
 		quoted[i] = w
 	}
@@ -304,7 +505,7 @@ func interpreter(path, goos string, lookPath func(string) (string, error)) ([]st
 }
 
 // listSessions returns the session files of dir, the folder sessions/ of the
-// project: its *.txt files, sorted; none if there is no such folder.
+// project: its *.txt and *.sh files, sorted; none if there is no such folder.
 func listSessions(dir string) []string {
 	entries, err := os.ReadDir(dir) // sorted by name
 	if err != nil {
@@ -313,7 +514,7 @@ func listSessions(dir string) []string {
 	var files []string
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasPrefix(name, ".") || !strings.EqualFold(filepath.Ext(name), ".txt") {
+		if strings.HasPrefix(name, ".") || !(strings.EqualFold(filepath.Ext(name), ".txt") || isScript(name)) {
 			continue
 		}
 		if path := filepath.Join(dir, name); isFile(path) {
@@ -359,7 +560,7 @@ func printCommands(w io.Writer, entries []entry, common []string, subject string
 		return err
 	}
 	for _, e := range entries {
-		if _, err := fmt.Fprintln(w, shellJoin(command(e, common, subject))); err != nil {
+		if _, err := fmt.Fprintln(w, shownCommand(e, common, subject)); err != nil {
 			return err
 		}
 	}

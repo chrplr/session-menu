@@ -245,7 +245,7 @@ func TestAppendLog(t *testing.T) {
 			[]string{"/x/B", "-title", `a, "b"`}},
 	}
 	for _, r := range runs {
-		if err := appendLog(path, r.r, "1", r.session, r.lineno, r.cmd); err != nil {
+		if err := appendLog(path, r.r, "1", r.session, r.lineno, shellJoin(r.cmd)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -278,7 +278,7 @@ func TestNotFoundWindows(t *testing.T) {
 
 func TestListSessions(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"sub-002.txt", "pilot.TXT", "sub-001_sess-01.txt", "notes.md", ".hidden.txt"} {
+	for _, name := range []string{"sub-002.txt", "pilot.TXT", "sub-001_sess-01.txt", "notes.md", ".hidden.txt", "run.sh", ".hidden.sh"} {
 		write(t, filepath.Join(dir, name), "", 0o644)
 	}
 	if err := os.Mkdir(filepath.Join(dir, "old.txt"), 0o755); err != nil {
@@ -288,7 +288,7 @@ func TestListSessions(t *testing.T) {
 	for _, p := range listSessions(dir) {
 		got = append(got, filepath.Base(p))
 	}
-	if want := []string{"pilot.TXT", "sub-001_sess-01.txt", "sub-002.txt"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"pilot.TXT", "run.sh", "sub-001_sess-01.txt", "sub-002.txt"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("listSessions = %q, want %q", got, want)
 	}
 	if got := listSessions(filepath.Join(dir, "missing")); got != nil {
@@ -366,7 +366,7 @@ func TestLoadMarks(t *testing.T) {
 		{0, "1", "sessions/b.txt", 6}, // another session
 		{0, "1", "", 0},               // a program of bin/
 	} {
-		if err := appendLog(path, result{t0, t0, r.code}, r.subject, r.session, r.line, []string{"/x/A"}); err != nil {
+		if err := appendLog(path, result{t0, t0, r.code}, r.subject, r.session, r.line, "/x/A"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -395,6 +395,291 @@ func TestMarkText(t *testing.T) {
 		if got := markText(2, e, tc.code, tc.ran); got != tc.want {
 			t.Errorf("markText(%d, %v) = %q, want %q", tc.code, tc.ran, got, tc.want)
 		}
+	}
+}
+
+func TestScriptShell(t *testing.T) {
+	for first, want := range map[string]string{
+		"#!/bin/sh":               "sh",
+		"#!/bin/bash":             "bash",
+		"#! /bin/bash -e":         "bash",
+		"#!/usr/bin/env bash":     "bash",
+		"#!/usr/bin/env -S bash":  "bash",
+		"#!/usr/bin/env A=1 zsh":  "zsh",
+		"#!/usr/bin/env":          "sh",
+		"#!":                      "sh",
+		"# a comment, no #! line": "sh",
+		"":                        "sh",
+	} {
+		if got := scriptShell(first); got != want {
+			t.Errorf("scriptShell(%q) = %q, want %q", first, got, want)
+		}
+	}
+}
+
+func TestRunsMarker(t *testing.T) {
+	for line, want := range map[string]bool{
+		"# runs":                true,
+		"#runs":                 true,
+		"# RUNS":                true,
+		"# Runs, one per line":  true,
+		"# runs: block 1":       true,
+		"# runs are 10 minutes": false,
+		"# dry runs":            false,
+		"runs":                  false,
+		"":                      false,
+	} {
+		if got := runsMarker.MatchString(line); got != want {
+			t.Errorf("runsMarker(%q) = %v, want %v", line, got, want)
+		}
+	}
+}
+
+// needShell returns the path of sh, or skips the test on a PC without it.
+func needShell(t *testing.T) string {
+	t.Helper()
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip(err)
+	}
+	return sh
+}
+
+const testScript = `#!/bin/sh
+set -e
+SUBJECT=${SUBJECT:-sub-01}
+RIG="a b.json"
+
+# Runs, one per line
+
+printf '%s|' one "$SUBJECT" "$RIG"
+# a comment
+printf '%s|' two \
+    "$RIG" "$0"
+
+exit 7
+`
+
+func TestReadScript(t *testing.T) {
+	sh := needShell(t)
+	path := filepath.Join(t.TempDir(), "s.sh")
+	write(t, path, testScript, 0o644)
+	runs, err := readScript(path, filepath.Dir(path), exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got [][3]any
+	for _, e := range runs {
+		got = append(got, [3]any{e.line, e.lineno, e.nlines})
+	}
+	want := [][3]any{
+		{`printf '%s|' one "$SUBJECT" "$RIG"`, 8, 1},
+		{`printf '%s|' two "$RIG" "$0"`, 10, 2},
+		{"exit 7", 13, 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("readScript = %q, want %q", got, want)
+	}
+	if runs[0].script.shell != sh {
+		t.Errorf("shell = %q, want %q", runs[0].script.shell, sh)
+	}
+	// The common arguments and the placeholder are for the other format.
+	cmd := command(runs[0], []string{"-s", "{subject}"}, "002")
+	if cmd[0] != sh || cmd[1] != "-c" || cmd[3] != path || len(cmd) != 4 {
+		t.Errorf("command = %q", cmd)
+	}
+	if strings.Contains(cmd[2], "-s {subject}") {
+		t.Errorf("common arguments in %q", cmd[2])
+	}
+	if got := shownCommand(runs[0], []string{"-s"}, "002"); got != runs[0].line {
+		t.Errorf("shownCommand = %q", got)
+	}
+}
+
+func TestReadScriptErrors(t *testing.T) {
+	needShell(t)
+	dir := t.TempDir()
+	for name, tc := range map[string]struct{ content, want string }{
+		"no marker": {"#!/bin/sh\necho hello\n", "no line '# runs'"},
+		"no runs":   {"#!/bin/sh\n# runs\n# only a comment\n\n", "no command below"},
+		"split if":  {"#!/bin/sh\n# runs\nif true; then\n  echo yes\nfi\n", ":3: not a whole command for sh"},
+		"settings":  {"#!/bin/sh\nif true; then\n# runs\necho yes\n", ":4: not a whole command for sh"},
+	} {
+		path := filepath.Join(dir, "s.sh")
+		write(t, path, tc.content, 0o644)
+		if _, err := readScript(path, filepath.Dir(path), exec.LookPath); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+		}
+	}
+	path := filepath.Join(dir, "s.sh")
+	write(t, path, "#!/bin/nosuchshell\n# runs\necho yes\n", 0o644)
+	_, err := readScript(path, dir, func(string) (string, error) { return "", errors.New("not found") })
+	if err == nil || !strings.Contains(err.Error(), "nosuchshell is not in the PATH") {
+		t.Errorf("no shell: err = %v", err)
+	}
+	if _, err := readScript(filepath.Join(dir, "missing.sh"), dir, exec.LookPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("missing file: err = %v", err)
+	}
+}
+
+func TestRunProgram(t *testing.T) {
+	for line, want := range map[string]string{
+		"uv run task --x 1": "uv",
+		"bin/task.py":       "bin/task.py",
+		"./task; echo done": "./task",
+		"A=1 B=x uv run":    "uv",
+		"$PROG -x":          "$PROG",
+		"${PROG:-task} -x":  "${PROG:-task}",
+		`"$PROG" -x`:        "",
+		"$(which task) -x":  "",
+		"(cd a && task)":    "",
+		"A=1":               "",
+	} {
+		got := ""
+		if m := runProgram.FindStringSubmatch(line); m != nil {
+			got = m[1]
+		}
+		if got != want {
+			t.Errorf("runProgram(%q) = %q, want %q", line, got, want)
+		}
+	}
+}
+
+func TestCheckPrograms(t *testing.T) {
+	needShell(t)
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "bin", "ok"), "#!/bin/sh\n", 0o755)
+	write(t, filepath.Join(dir, "other", "here"), "#!/bin/sh\n", 0o755)
+	path := filepath.Join(dir, "s.sh")
+	for name, tc := range map[string]struct{ content, want string }{ // want "": no error
+		"found, builtin, keyword": {"# runs\nbin/ok\necho a\nexit 1\nif true; then echo a; fi\n", ""},
+		"variable":                {"P=bin/ok\n# runs\n$P -x\n", ""},
+		"PATH of the settings":    {"PATH=other:$PATH\n# runs\nhere\n", ""},
+		"assignment first":        {"# runs\nA=1 bin/ok\n", ""},
+		"not checked":             {"# runs\n\"$NOTSET\" -x\n", ""},
+		"missing, with its line":  {"# runs\necho a\nnosuchprog_xyz --x\n", ":3: program nosuchprog_xyz not found"},
+		"missing in bin":          {"# runs\nbin/absent\n", ":2: program bin/absent not found"},
+		"empty variable":          {"# runs\n$NOTSET_XYZ -x\n", ":2: program $NOTSET_XYZ not found"},
+		"settings fail":           {"set -e\nfalse\n# runs\necho a\n", "the lines above '# runs' failed (exit 1)"},
+		"settings with a message": {"echo no rig >&2; exit 4\n# runs\necho a\n", "failed (exit 4): no rig"},
+		"settings exit 97":        {"exit 97\n# runs\necho a\n", "failed (exit 97)"},
+	} {
+		write(t, path, tc.content, 0o644)
+		_, err := readScript(path, dir, exec.LookPath)
+		if tc.want == "" && err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+		}
+	}
+	// The check looks for the program of a run, and does not run it.
+	marker := filepath.Join(dir, "ran")
+	write(t, path, "#!/bin/sh\n# runs\ntouch "+marker+"\n", 0o644)
+	if _, err := readScript(path, dir, exec.LookPath); err != nil {
+		t.Fatal(err)
+	}
+	if isFile(marker) {
+		t.Error("the check ran a run")
+	}
+	// Settings that hang.
+	defer func(d time.Duration) { scriptCheckTime = d }(scriptCheckTime)
+	scriptCheckTime = 100 * time.Millisecond
+	write(t, path, "sleep 30\n# runs\necho a\n", 0o644)
+	start := time.Now()
+	_, err := readScript(path, dir, exec.LookPath)
+	if err == nil || !strings.Contains(err.Error(), "did not end") {
+		t.Errorf("hang: err = %v", err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("hang: took %v", d)
+	}
+}
+
+func TestPickerText(t *testing.T) {
+	path := filepath.Join("x", "sessions", "pilot.sh")
+	if got := pickerText(path, nil); got != "pilot" {
+		t.Errorf("no error: %q", got)
+	}
+	err := errors.New(path + ":3: no\n  [good]")
+	if got, want := pickerText(path, err), "pilot  ✗ pilot.sh:3: no [good[]"; got != want {
+		t.Errorf("error: %q, want %q", got, want)
+	}
+}
+
+// TestScriptText checks that the other runs are blank, and that every line
+// keeps its number.
+func TestScriptText(t *testing.T) {
+	s := &shellScript{lines: strings.Split("A=1\n# runs\nrun 1\n# note\nrun 2 \\\n  more\n\nrun 3\n", "\n"), marker: 1}
+	got := strings.Split(s.text(entry{lineno: 5, nlines: 2}, "it's"), "\n")
+	if len(got) != len(s.lines) {
+		t.Fatalf("%d lines, want %d: %q", len(got), len(s.lines), got)
+	}
+	if got[0] != "A=1" {
+		t.Errorf("settings line: %q", got[0])
+	}
+	if !strings.HasPrefix(got[1], `[ "$SUBJECT" = 'it'\''s' ] ||`) {
+		t.Errorf("check: %q", got[1])
+	}
+	want := []string{"", "", `set -x; run 2 \`, "  more", "", "", ""}
+	if !reflect.DeepEqual(got[2:], want) {
+		t.Errorf("runs: %q, want %q", got[2:], want)
+	}
+	if s.lines[2] != "run 1" {
+		t.Error("text changed the lines of the script")
+	}
+}
+
+// TestRunScript runs the runs of a script in a real shell, as the menu does.
+func TestRunScript(t *testing.T) {
+	needShell(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.sh")
+	write(t, path, testScript, 0o644)
+	runs, err := readScript(path, filepath.Dir(path), exec.LookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec1 := func(e entry, subject string) (string, int) {
+		cmd := command(e, nil, subject)
+		c := exec.Command(cmd[0], cmd[1:]...)
+		c.Env = append(os.Environ(), "SUBJECT="+subject)
+		out, err := c.Output() // not the trace, on stderr
+		return string(out), exitCode(err)
+	}
+	// Unexported variables, the Subject ID of the menu, and $0.
+	if out, code := exec1(runs[0], "002"); out != "one|002|a b.json|" || code != 0 {
+		t.Errorf("run 1: %q, exit %d", out, code)
+	}
+	// $0: only its end, as a Windows shell may write the path otherwise.
+	if out, code := exec1(runs[1], "002"); !strings.HasPrefix(out, "two|a b.json|") || !strings.HasSuffix(out, "s.sh|") || code != 0 {
+		t.Errorf("run 2: %q, exit %d", out, code)
+	}
+	if _, code := exec1(runs[2], "002"); code != 7 {
+		t.Errorf("run 3: exit %d, want 7", code)
+	}
+	// A script that replaces the Subject ID does not start the run, whatever
+	// the ID, however odd.
+	write(t, path, "#!/bin/sh\nSUBJECT=sub-01\n# runs\necho RUN\n", 0o644)
+	if runs, err = readScript(path, filepath.Dir(path), exec.LookPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"002", `it's`, `$(echo x)`} {
+		cmd := command(runs[0], nil, id)
+		c := exec.Command(cmd[0], cmd[1:]...)
+		c.Env = append(os.Environ(), "SUBJECT="+id)
+		var stderr bytes.Buffer
+		c.Stderr = &stderr
+		out, err := c.Output()
+		if code := exitCode(err); code != 3 || len(out) != 0 {
+			t.Errorf("subject %q: %q, exit %d, want no output, exit 3", id, out, code)
+		}
+		if want := "the Subject ID is " + id + "."; !strings.Contains(stderr.String(), want) {
+			t.Errorf("subject %q: message %q, want %q", id, stderr.String(), want)
+		}
+	}
+	if out, code := exec1(runs[0], "sub-01"); !strings.Contains(out, "RUN") || code != 0 {
+		t.Errorf("same subject: %q, exit %d", out, code)
 	}
 }
 

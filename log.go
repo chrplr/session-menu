@@ -42,8 +42,8 @@ var logHeader = []string{"start", "end", "duration_s", "exit_code", "subject", "
 // appendLog appends a run to the log at path, a CSV file created with its
 // header if it does not exist yet. session is the session file as sessionKey
 // names it ("" without one), lineno its line (0 without one), and cmd the
-// command line as it was run.
-func appendLog(path string, r result, subject, session string, lineno int, cmd []string) error {
+// command as shownCommand gives it.
+func appendLog(path string, r result, subject, session string, lineno int, cmd string) error {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
@@ -64,7 +64,7 @@ func appendLog(path string, r result, subject, session string, lineno int, cmd [
 	w.Write([]string{
 		r.start.Format(timeFormat), r.end.Format(timeFormat),
 		strconv.FormatFloat(r.end.Sub(r.start).Seconds(), 'f', 3, 64),
-		strconv.Itoa(r.exitCode), subject, session, line, shellJoin(cmd),
+		strconv.Itoa(r.exitCode), subject, session, line, cmd,
 	})
 	w.Flush()
 	if err := w.Error(); err != nil {

@@ -28,11 +28,11 @@ const guard = 500 * time.Millisecond
 // clockTick is how often the timer is redrawn when nothing else happens.
 const clockTick = 30 * time.Second
 
-// run runs cmd in the folder dir, in the terminal. On failure, it keeps the
-// output on screen until the user has read it; the end of the run is taken
-// before that.
-func run(cmd []string, dir string) result {
-	fmt.Printf("\n%s\n", shellJoin(cmd))
+// run runs cmd in the folder dir, in the terminal, after printing shown. On
+// failure, it keeps the output on screen until the user has read it; the end
+// of the run is taken before that.
+func run(cmd []string, shown, dir string) result {
+	fmt.Printf("\n%s\n", shown)
 
 	// Ctrl-C stops the program, not the menu
 	sig := make(chan os.Signal, 1)
@@ -109,6 +109,9 @@ type menu struct {
 	subjectPath string   // the last Subject ID
 	common      []string // the common arguments
 	header      string   // second line of every page
+	// the same for a session that is a shell script, which gets no common
+	// arguments
+	scriptHeader string
 
 	started time.Time       // when the menu was launched
 	limit   time.Duration   // the planned duration of the session (0: none)
@@ -140,17 +143,18 @@ func newMenu(root, logPath, subjectPath string, common []string, subjectID strin
 		args = shellJoin(common)
 	}
 	m := &menu{
-		app:         tview.NewApplication(),
-		pages:       tview.NewPages(),
-		root:        root,
-		logPath:     logPath,
-		subjectPath: subjectPath,
-		common:      common,
-		header:      fmt.Sprintf("Project: %s | Common args: %s", homeTilde(root), args),
-		subjectID:   subjectID,
-		started:     time.Now(),
-		limit:       limit,
-		clock:       tview.NewTextView().SetTextColor(tcell.ColorGreen),
+		app:          tview.NewApplication(),
+		pages:        tview.NewPages(),
+		root:         root,
+		logPath:      logPath,
+		subjectPath:  subjectPath,
+		common:       common,
+		header:       fmt.Sprintf("Project: %s | Common args: %s", homeTilde(root), args),
+		scriptHeader: fmt.Sprintf("Project: %s | Common args: not used by a shell script", homeTilde(root)),
+		subjectID:    subjectID,
+		started:      time.Now(),
+		limit:        limit,
+		clock:        tview.NewTextView().SetTextColor(tcell.ColorGreen),
 	}
 	m.app.SetInputCapture(m.keys)
 	// The timer is computed at every draw, so that it is right after a key
@@ -176,10 +180,10 @@ func homeTilde(path string) string {
 
 // page frames the items of a page: the timer and the header at the top, the
 // help line at the bottom.
-func (m *menu) page(title, help string, items ...tview.Primitive) *tview.Flex {
+func (m *menu) page(header, title, help string, items ...tview.Primitive) *tview.Flex {
 	f := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(m.clock, 1, 0, false).
-		AddItem(tview.NewTextView().SetText(m.header).SetTextColor(tcell.ColorGreen), 1, 0, false).
+		AddItem(tview.NewTextView().SetText(header).SetTextColor(tcell.ColorGreen), 1, 0, false).
 		AddItem(nil, 1, 0, false)
 	for _, it := range items {
 		if _, isList := it.(*tview.List); isList {
@@ -193,12 +197,26 @@ func (m *menu) page(title, help string, items ...tview.Primitive) *tview.Flex {
 	return f
 }
 
-// showPicker adds the list of the session files, and shows it.
+// pickerText is the text of a session file in the list: its name, and what is
+// wrong with it, if anything, on one line and with only the name of the file.
+func pickerText(path string, err error) string {
+	text := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if err != nil {
+		why := strings.ReplaceAll(err.Error(), path, filepath.Base(path))
+		text += "  ✗ " + strings.Join(strings.Fields(why), " ")
+	}
+	return tview.Escape(text)
+}
+
+// showPicker adds the list of the session files, and shows it. It reads each
+// of them now, so that what is wrong with one shows before the session, and
+// not when it is opened. One that cannot work does not stop the others.
 func (m *menu) showPicker(sessions []string, load func(string) ([]entry, error)) {
 	m.sessions, m.load = sessions, load
 	m.picker = tview.NewList().ShowSecondaryText(false).SetWrapAround(false)
 	for _, path := range sessions {
-		m.picker.AddItem(tview.Escape(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))), "", 0, nil)
+		_, err := load(path)
+		m.picker.AddItem(pickerText(path, err), "", 0, nil)
 	}
 	m.picker.AddItem(quit, "", 0, nil)
 	m.picker.SetSelectedFunc(func(i int, _, _ string, _ rune) {
@@ -213,7 +231,7 @@ func (m *menu) showPicker(sessions []string, load func(string) ([]entry, error))
 		}
 		m.openSession(m.sessions[i], entries)
 	})
-	m.pages.AddPage("picker", m.page("Sessions", "Enter: open   q: quit", m.picker), true, true)
+	m.pages.AddPage("picker", m.page(m.header, "Sessions", "Enter: open   q: quit", m.picker), true, true)
 	m.setFocus(m.picker)
 }
 
@@ -265,7 +283,11 @@ func (m *menu) openSession(path string, entries []entry) {
 	if len(m.sessions) > 0 {
 		help = "Enter: run   Tab: Subject ID   Esc: sessions   q: quit"
 	}
-	m.pages.AddAndSwitchToPage("session", m.page(title, help, m.field, nil, m.list), true)
+	header := m.header
+	if entries[0].script != nil {
+		header = m.scriptHeader
+	}
+	m.pages.AddAndSwitchToPage("session", m.page(header, title, help, m.field, nil, m.list), true)
 	m.setFocus(m.field)
 }
 
@@ -310,10 +332,11 @@ func (m *menu) runEntry(i int) {
 
 	e := m.entries[i]
 	cmd := command(e, m.common, id)
+	shown := shownCommand(e, m.common, id)
 	// Leave the full screen so that the program's output goes to a normal
 	// terminal
 	var res result
-	m.app.Suspend(func() { res = run(cmd, m.root) })
+	m.app.Suspend(func() { res = run(cmd, shown, m.root) })
 	m.resumed = time.Now()
 
 	m.marks[i] = res.exitCode
@@ -321,7 +344,7 @@ func (m *menu) runEntry(i int) {
 	if res.exitCode == 0 && i < len(m.entries)-1 {
 		m.list.SetCurrentItem(i + 1)
 	}
-	if err := appendLog(m.logPath, res, id, m.session, e.lineno, cmd); err != nil {
+	if err := appendLog(m.logPath, res, id, m.session, e.lineno, shown); err != nil {
 		m.showError(fmt.Sprintf("Could not write the log: %v", err), m.list)
 	}
 }

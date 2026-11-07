@@ -21,7 +21,7 @@ in it, whatever folder the menu was started from. It may hold:
 | File or folder | Meaning |
 |---|---|
 | `bin/` | Programs, looked up before the PATH |
-| `sessions/` | Session files (`*.txt`), listed by the menu to choose from |
+| `sessions/` | Session files (`*.txt`, or shell scripts `*.sh`), listed by the menu to choose from |
 | `command_line_args.txt` | Arguments given to every program (optional; see below) |
 | `.last_subject.txt` | The last subject ID, written by the menu |
 | `session-menu-log.csv` | The log of the runs, written by the menu (see below) |
@@ -56,8 +56,8 @@ MEG-ARC -run 2
 - If the file name starts with `sub-<ID>` (up to the first `_` or `.`), the Subject ID field is
   pre-filled with `<ID>`, as written (`sub-001` gives `001`).
 
-Without a session file on the command line, the menu lists the `*.txt` files of `sessions/` to
-choose from. If there are none, it lists every program of `bin/`, in alphabetical order.
+Without a session file on the command line, the menu lists the `*.txt` and `*.sh` files of `sessions/`
+to choose from. If there are none, it lists every program of `bin/`, in alphabetical order.
 
 On Windows, the programs of `bin/` are the `.exe`, `.bat` and `.cmd` files (if two have the same
 name, `.exe` first, then `.bat`), and the `.py` files, under their full name, which the menu runs
@@ -71,6 +71,60 @@ python "%~dp0task_a.py" %*
 
 then `task_a` in a session line runs `task_a.py` with the common arguments and the options of the
 line.
+
+## Session files that are shell scripts
+
+A session file named `*.sh` is a shell script, which also works without the menu (`sh pilot.sh`). A
+comment line `# runs` separates its settings from the commands that the menu lists:
+
+```sh
+#!/bin/sh
+set -e
+
+# Session parameters
+SUBJECT=${SUBJECT:-sub-01}
+RIG=configs/rigs/fmri.json
+
+# Runs, one per line
+uv run fmri-play --subject $SUBJECT --rig "$RIG" --run 1
+uv run fmri-play --subject $SUBJECT --rig "$RIG" --run 2 \
+    --duration 600
+```
+
+- The comment can be `# runs` or `# Runs, one per line`, in upper or lower case, but not, for example,
+  `# runs are 10 minutes`. Without it, the session does not open.
+- Each line below it is one entry of the menu, except blank lines and comments. A line that ends with `\`
+  continues on the next. A command over several lines, such as an `if` block, is refused when the session
+  is opened, unless it is written on one line.
+- For each entry, the menu gives the shell the lines above the comment, then that command. So the
+  variables work without `export`, with all of the shell's syntax, as when the script runs on its own.
+- **The lines above the comment run again before each entry**, so use them to set things, not to do
+  things: `STAMP=$(date +%s)` differs from one entry to the next, and each entry starts with no variable
+  set by another entry.
+- The shell is the one of the `#!` line (`sh` without one). It must be in the PATH: on Windows, that means
+  Git Bash or similar.
+- As in any shell script, `bin/` is not searched: write `bin/task.py`.
+- Before anything runs, the menu checks each script (see below): it runs the lines above the comment
+  once, as an entry would, then looks for the first word of each command. So a program that is missing
+  or not executable shows before the session, and so do settings that fail. A `PATH` or a variable set
+  in those lines counts. Only the first word is checked: `uv run fmri-play` needs `uv`, but nothing
+  tells the menu that `fmri-play` is there. To check more, add it to the settings, which stop the
+  session if it fails:
+
+  ```sh
+  [ -f "$RIG" ] || { echo "no rig file: $RIG" >&2; exit 1; }
+  ```
+
+  A program that an earlier entry creates would be refused, as it does not exist yet.
+- `command_line_args.txt` and `{subject}` do not apply: use variables, and `$SUBJECT`.
+
+**Write the subject as `SUBJECT=${SUBJECT:-sub-01}`.** It takes the Subject ID of the menu, and `sub-01`
+when the script runs on its own. A plain `SUBJECT=sub-01` would replace the ID typed in the menu, and the
+data would go under the wrong subject, so the menu then refuses to start the program, says why, and marks
+the entry `✗ exit 3`.
+
+The terminal shows each command with its values (`+ uv run fmri-play --subject 002 ...`). The log and
+`-print` have it as written in the script (`--subject $SUBJECT`).
 
 ## Arguments common to every program
 
@@ -213,6 +267,9 @@ macOS).
 [project2/](project2/README.md) is a fuller one: two dummy Python scripts and a dummy Go program, which
 read their settings from `config.toml` and print them with their arguments, and three session files.
 
+`project3/sessions/` has session files that are shell scripts, for a program that is not in this
+repository (`fmri-play`), so they are examples to read, not to run.
+
 ## Errors
 
 The menu refuses to start, and says why, if:
@@ -221,10 +278,14 @@ The menu refuses to start, and says why, if:
 - a program is found in neither `bin/` nor the PATH (with the file and line). If `bin/` has a file of
   that name that is not executable (on Windows: not a `.exe`, `.bat`, `.cmd` or `.py`), the message says so;
 - a line or `command_line_args.txt` has an unclosed quote (with the file and line);
-- there is no session file, no `sessions/*.txt` and no program in `bin/`.
+- a session file that is a shell script has no `# runs` line, nothing below it, a command that is not
+  whole, a program that is not found or not executable, lines above `# runs` that fail or take more than
+  30 s, or a shell that is not in the PATH;
+- there is no session file, no `sessions/*.txt` or `*.sh`, and no program in `bin/`.
 
-A session chosen in the list of sessions with one of these errors is not opened: the menu shows the
-error.
+The menu checks every session file of the list of sessions when it starts. One with an error stays in
+the list, with `✗` and the error, and the others still work. It cannot be opened: choosing it shows the
+whole error.
 
 ## Options
 
