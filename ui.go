@@ -80,14 +80,14 @@ func markText(i int, e entry, code int, ran bool) string {
 	return tview.Escape(fmt.Sprintf("%-10s %d. %s", mark, i+1, e.line))
 }
 
-// timerText is the text of the timer, in HH:mm: the time elapsed, and, with a
-// limit (a whole number of minutes; 0: none), the time remaining. Elapsed time
-// rounds down and remaining time up, so that they add up to the limit; past
-// the limit, the time remaining is negative.
-func timerText(elapsed, limit time.Duration) string {
+// timerText is the text of the timer, in HH:mm: the time of day it started,
+// the time elapsed, and, with a limit (a whole number of minutes; 0: none), the
+// time remaining. Elapsed time rounds down and remaining time up, so that they
+// add up to the limit; past the limit, the time remaining is negative.
+func timerText(started time.Time, elapsed, limit time.Duration) string {
 	hhmm := func(minutes int) string { return fmt.Sprintf("%02d:%02d", minutes/60, minutes%60) }
 	done := int(elapsed / time.Minute)
-	text := "Elapsed " + hhmm(done)
+	text := "Started " + started.Format("15:04") + " | Elapsed " + hhmm(done)
 	if limit <= 0 {
 		return text
 	}
@@ -156,7 +156,7 @@ func newMenu(root, logPath, subjectPath string, common []string, subjectID strin
 	// The timer is computed at every draw, so that it is right after a key
 	// or when a program returns, not only at a tick of runMenu.
 	m.app.SetBeforeDrawFunc(func(tcell.Screen) bool {
-		m.clock.SetText(timerText(time.Since(m.started), m.limit))
+		m.clock.SetText(timerText(m.started, time.Since(m.started), m.limit))
 		return false
 	})
 	return m

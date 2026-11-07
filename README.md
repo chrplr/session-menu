@@ -175,9 +175,10 @@ The two approaches combine well:
 - Ctrl-C stops the running program, not the menu.
 - The programs also get the subject ID in the environment variable `SUBJECT`.
 
-The first line is a timer, in hours and minutes (HH:mm): the time since the menu was started, and,
-with `-max-duration-min`, the time remaining. Past that duration, the time remaining is negative; nothing
-is stopped. The timer is updated at least every 30 s, and is not on screen while a program runs.
+The first line is a timer, in hours and minutes (HH:mm): the time of day the menu was started, the
+time elapsed since, and, with `-max-duration-min`, the time remaining. Past that duration, the time
+remaining is negative; nothing is stopped. The timer is updated at least every 30 s, and is not on
+screen while a program runs.
 
 Below it, the header shows the project folder and the common arguments. The bottom line shows the keys.
 

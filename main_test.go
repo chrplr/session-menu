@@ -399,6 +399,7 @@ func TestMarkText(t *testing.T) {
 }
 
 func TestTimerText(t *testing.T) {
+	started := time.Date(2026, 11, 7, 9, 5, 30, 0, time.UTC)
 	for _, tc := range []struct {
 		elapsed, limit time.Duration
 		want           string
@@ -415,9 +416,15 @@ func TestTimerText(t *testing.T) {
 		{95 * time.Minute, 90 * time.Minute, "Elapsed 01:35 | Remaining -00:05"},
 		{100*time.Hour + 90*time.Minute, 90 * time.Minute, "Elapsed 101:30 | Remaining -100:00"},
 	} {
-		if got := timerText(tc.elapsed, tc.limit); got != tc.want {
-			t.Errorf("timerText(%v, %v) = %q, want %q", tc.elapsed, tc.limit, got, tc.want)
+		want := "Started 09:05 | " + tc.want
+		if got := timerText(started, tc.elapsed, tc.limit); got != want {
+			t.Errorf("timerText(%v, %v) = %q, want %q", tc.elapsed, tc.limit, got, want)
 		}
+	}
+	// The afternoon: a 24-hour clock.
+	afternoon := time.Date(2026, 11, 7, 14, 32, 0, 0, time.UTC)
+	if got, want := timerText(afternoon, 0, 0), "Started 14:32 | Elapsed 00:00"; got != want {
+		t.Errorf("timerText(%v, 0, 0) = %q, want %q", afternoon, got, want)
 	}
 }
 
