@@ -5,7 +5,7 @@ reads the project's settings, prints a message and its arguments, then waits for
 wait, the menu would come back at once and cover the output.
 
 ```
-project/
+project2/
 ├── command_line_args.txt   arguments given to every program: -s {subject} -screen 1
 ├── config.toml             settings of the tasks
 ├── bin/
@@ -24,7 +24,7 @@ project/
 Build the Go task into `bin/`, then start the menu from the project folder:
 
 ```
-cd project
+cd project2
 go build -C go-task -o ../bin/ .
 session-menu
 ```
@@ -37,7 +37,7 @@ The menu lists the three sessions. Open `sub-001_sess-01`: the Subject ID field 
 line of `sub-001_sess-01.txt` runs:
 
 ```
-.../project/bin/go-task -s 001 -screen 1 -run 1
+.../project2/bin/go-task -s 001 -screen 1 -run 1
 Hello from go-task (Example lab, screen at 60 cm)
 arguments: ["-s" "001" "-screen" "1" "-run" "1"]
 subject "001", screen 1, run 1
@@ -69,7 +69,7 @@ Windows the menu runs them with Python (see below). So the menu finds them as pr
 the common arguments right after their name:
 
 ```
-.../project/bin/task_a.py -s 001 -screen 1
+.../project2/bin/task_a.py -s 001 -screen 1
 ```
 
 A line such as `python3 bin/task_a.py` would get the common arguments right after `python3`, before

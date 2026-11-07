@@ -10,7 +10,7 @@ Source code, releases and issues: <https://github.com/chrplr/session-menu>
 Usage:
 
 ```
-session-menu [-dir DIR] [-print] [SESSION_FILE]
+session-menu [-dir DIR] [-print] [-max-duration-min N] [SESSION_FILE]
 ```
 
 ## The project folder
