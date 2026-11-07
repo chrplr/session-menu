@@ -5,7 +5,7 @@ the same arguments given to each of them. It works on Linux, Windows and macOS.
 
 Source code, releases and issues: <https://github.com/chrplr/session-menu>
 
-![session-menu running the session sub-001_sess-01 of project_simple: the first two programs are done (✓), the cursor is on the third](images/screenshot.png)
+![session-menu running the session sub-001_sess-01 of project1: the first two programs are done (✓), the cursor is on the third](images/screenshot.png)
 
 Usage:
 
@@ -147,7 +147,7 @@ such as `track`, still need their settings on the command line.
 
 The programs run in the project folder, so they can open `config.toml` by this relative path. A
 program that is also started without the menu can look for it from its own location instead, e.g. in
-the parent of `bin/`, as the [example project](project/README.md) does.
+the parent of `bin/`, as the [example project](project2/README.md) does.
 
 The two approaches combine well:
 - `config.toml` holds the settings of the experiment;
@@ -201,11 +201,11 @@ run (see *Use*).
 
 ## Example
 
-[project_simple/](project_simple/README.md) is a project folder to try the menu, with nothing to
+[project1/](project1/README.md) is a project folder to try the menu, with nothing to
 build: dummy bash and Python scripts, which print their arguments, and two session files (Linux and
 macOS).
 
-[project/](project/README.md) is a fuller one: two dummy Python scripts and a dummy Go program, which
+[project2/](project2/README.md) is a fuller one: two dummy Python scripts and a dummy Go program, which
 read their settings from `config.toml` and print them with their arguments, and three session files.
 
 ## Errors

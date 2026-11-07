@@ -1,4 +1,4 @@
-module github.com/chrplr/session-menu/project/go-task
+module github.com/chrplr/session-menu/project2/go-task
 
 go 1.25.7
 

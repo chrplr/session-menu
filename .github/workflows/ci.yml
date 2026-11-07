@@ -36,7 +36,7 @@ jobs:
           GOOS=darwin GOARCH=arm64 go build -o /tmp/darwin/ .
 
       - name: Example project
-        working-directory: project/go-task
+        working-directory: project2/go-task
         run: |
           go vet ./...
           go build -o ../bin/ .

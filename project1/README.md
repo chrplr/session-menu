@@ -2,10 +2,10 @@
 
 A project folder for `session-menu` with only bash and Python scripts: nothing to build, no
 configuration file. For a fuller example, with a Go program and settings in `config.toml`, see
-[../project](../project/README.md).
+[../project2](../project2/README.md).
 
 ```
-project_simple/
+project1/
 ├── command_line_args.txt   arguments given to every program: -s {subject}
 ├── bin/
 │   ├── check_setup.sh      bash: prints the subject ID
@@ -22,7 +22,7 @@ once and cover the output.
 ## Running it
 
 ```
-cd project_simple
+cd project1
 session-menu
 ```
 
@@ -36,10 +36,10 @@ would run, without running it:
 ```
 $ session-menu -print sessions/sub-001_sess-01.txt
 # subject: 001
-.../project_simple/bin/check_setup.sh -s 001
-.../project_simple/bin/task.py -s 001 --run 1
-.../project_simple/bin/task.py -s 001 --run 2
-.../project_simple/bin/questionnaire.sh 001
+.../project1/bin/check_setup.sh -s 001
+.../project1/bin/task.py -s 001 --run 1
+.../project1/bin/task.py -s 001 --run 2
+.../project1/bin/questionnaire.sh 001
 ```
 
 - `check_setup.sh` and `task.py` get the common arguments, `-s 001`, right after their name, then
