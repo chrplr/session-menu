@@ -1,11 +1,53 @@
 # session-menu
 
-A terminal menu to run the programs of a session, one after the other, with the same subject ID and
-the same arguments given to each of them. It works on Linux, Windows and macOS.
+session-menu is a _launcher_ for data acquisition sessions.
 
-Source code, releases and issues: <https://github.com/chrplr/session-menu>
+In scientific studies, data are often collected across several _sessions_, where each session is a
+sequence of _runs_ of data acquisition. For each run, a program is launched to do a calibration,
+acquire data, etc.
+
+One way to handle this is to write one script per session, e.g. `session-01.sh`, `session-02.sh`, or
+`sub-001_sess-01.sh`…, which lists the programs to launch, in order. For example:
+
+```sh
+#!/bin/bash
+# session-01.sh
+SUBJECT=${SUBJECT:-${1:-000}}   # participant ID
+
+eyetracker-calibration
+localizer1 --sub $SUBJECT
+localizer2 --sub $SUBJECT
+task1 --sub $SUBJECT
+task2 --sub $SUBJECT
+```
+
+(Several participants can do this session: the environment variable `SUBJECT`, or the first argument
+of the script, gives the participant ID.)
+
+Add the line `# runs` above the commands, and session-menu turns this script into a menu:
+
+```sh
+#!/bin/bash
+# session-01.sh
+SUBJECT=${SUBJECT:-${1:-000}}   # participant ID
+
+# runs
+eyetracker-calibration
+localizer1 --sub $SUBJECT
+...
+```
+
+```
+session-menu session-01.sh
+```
+
+Before the session starts, session-menu checks that every program can be found. The experimenter types
+the participant ID once, then starts each run from the menu, which shows a timer and which runs are
+done:
 
 ![session-menu running the session sub-001_sess-01 of project1: the first two programs are done (✓), the cursor is on the third](images/screenshot.png)
+
+The program works on Linux, Windows and macOS. Source code, releases and issues: <https://github.com/chrplr/session-menu>
 
 Usage:
 
@@ -13,21 +55,62 @@ Usage:
 session-menu [-dir DIR] [-print] [-max-duration-min N] [SESSION_FILE]
 ```
 
+## Why not just run the script?
+
+The script still works on its own (`bash session-01.sh 007`). Run through session-menu, it also gets:
+
+- **Restart where you stopped.** When a run fails, or the PC crashes, open the session again: the runs
+  already done are marked ✓, and the cursor is on the first run not done. No editing of the script,
+  no copying of lines.
+- **Rerun one run** by selecting it, e.g. after the participant moved.
+- **Errors before the participant arrives.** A program that is missing or not executable is reported
+  when the session opens, not when run 4 starts.
+- **A log of every run** (`session-menu-log.csv`): start, end, duration, exit code, subject, command.
+- **The subject ID typed once, and checked.** A script that would replace it with its own value is
+  refused, so the data do not go under the wrong subject.
+- **Fewer accidents.** Ctrl-C stops the run, not the session, and an Enter pressed twice does not start
+  the next run.
+- **A timer**, with the time left if you give the planned duration (`-max-duration-min`).
+
+## Quick start
+
+1. Download the archive for your system and put `session-menu` in your PATH (see
+   [Installing](#installing)).
+2. Try it on the example project of this repository, which has nothing to build (Linux or macOS):
+
+   ```
+   git clone https://github.com/chrplr/session-menu
+   cd session-menu/project1
+   session-menu
+   ```
+
+3. Choose a session with the arrow keys and Enter, type a Subject ID, press TAB to go to the list of
+   programs, and Enter to run the selected one. Esc goes back, `q` quits. See [Use](#use) for the rest.
+
 ## The project folder
 
 The menu works in a project folder: the current directory, or `DIR` with `-dir DIR`. The programs run
-in it, whatever folder the menu was started from. It may hold:
+in it, whatever folder the menu was started from. We recommend this layout, and starting the menu from
+the project folder:
+
+```
+project_name/
+├── sessions/      the session files
+└── bin/           the programs they call (binaries, Python scripts…)
+```
+
+The project folder may hold:
 
 | File or folder | Meaning |
 |---|---|
-| `bin/` | Programs, looked up before the PATH |
+| `bin/` | Programs, looked up before the PATH (for `.txt` session files; a shell script does not search it) |
 | `sessions/` | Session files (`*.txt`, or shell scripts `*.sh`), listed by the menu to choose from |
 | `command_line_args.txt` | Arguments given to every program (optional; see below) |
 | `.last_subject.txt` | The last subject ID, written by the menu |
 | `session-menu-log.csv` | The log of the runs, written by the menu (see below) |
 
 ```
-cd my-experiment
+cd project_name
 session-menu                                  # choose a session of sessions/
 session-menu sessions/sub-001_sess-01.txt     # or open one directly
 ```
@@ -37,9 +120,16 @@ current folder, then in the project folder.
 
 ## Session files
 
-A sesssion file is a simple text file, with one command per line: a program, then its options. 
-Blank lines and lines starting with `#` are ignored. The options are split as in a shell: quotes and backslashes work. A program may be listed
-several times.
+There are two kinds of session files:
+
+- **`*.txt`**: one command per line, without shell syntax. Start with these: the programs are looked
+  up in `bin/`, and they get the arguments of `command_line_args.txt` and the Subject ID (`{subject}`).
+- **`*.sh`**: shell scripts, as in the example above. Use them if you already have scripts, or need
+  variables and shell syntax. See [Session files that are shell scripts](#session-files-that-are-shell-scripts).
+
+A `.txt` session file is an ordinary text file, with one command per line: a program, then its options.
+Blank lines and lines starting with `#` are ignored. The options are split as in a shell: quotes and
+backslashes work. A program may be listed several times.
 
 ```
 # sub-001, session 1
@@ -85,14 +175,14 @@ set -e
 SUBJECT=${SUBJECT:-sub-01}
 RIG=configs/rigs/fmri.json
 
-# Runs, one per line
+# runs
 uv run fmri-play --subject $SUBJECT --rig "$RIG" --run 1
 uv run fmri-play --subject $SUBJECT --rig "$RIG" --run 2 \
     --duration 600
 ```
 
-- The comment can be `# runs` or `# Runs, one per line`, in upper or lower case, but not, for example,
-  `# runs are 10 minutes`. Without it, the session does not open.
+- Without a line `# runs`, the session does not open. (`# Runs:` and `# Runs, one per line` also work,
+  in any case, but not, for example, `# runs are 10 minutes`.)
 - Each line below it is one entry of the menu, except blank lines and comments. A line that ends with `\`
   continues on the next. A command over several lines, such as an `if` block, is refused when the session
   is opened, unless it is written on one line.
