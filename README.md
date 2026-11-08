@@ -7,13 +7,14 @@ sequence of _runs_ of data acquisition. For each run, a program is launched to d
 acquire data, etc.
 
 One way to handle this is to write one script per session, e.g. `session-01.sh`, `session-02.sh`, or
-`sub-001_sess-01.sh`…, which lists the programs to launch, in order. For example:
+`sub-001_sess-01.sh`…, listing the programs to launch, in order. Here is an example of such a script:
 
 ```sh
 #!/bin/bash
 # session-01.sh
-SUBJECT=${SUBJECT:-${1:-000}}   # participant ID
+SUBJECT=${SUBJECT:-${1:-000}}   # participant ID: $SUBJECT, else the first argument
 
+# runs
 eyetracker-calibration
 localizer1 --sub $SUBJECT
 localizer2 --sub $SUBJECT
@@ -21,31 +22,32 @@ task1 --sub $SUBJECT
 task2 --sub $SUBJECT
 ```
 
-(Several participants can do this session: the environment variable `SUBJECT`, or the first argument
-of the script, gives the participant ID.)
+The comment `# runs` tells session-menu where the runs start: each command below it becomes an entry of
+the menu. Being a comment, it changes nothing when the script runs on its own.
 
-Add the line `# runs` above the commands, and session-menu turns this script into a menu:
+On Windows, or if you don't write shell scripts, the same session is a plain list of commands,
+`session-01.txt`. session-menu finds the programs in `bin/` (`.exe`, `.bat`, `.py`…) and fills in the
+Subject ID:
 
-```sh
-#!/bin/bash
-# session-01.sh
-SUBJECT=${SUBJECT:-${1:-000}}   # participant ID
-
-# runs
+```
 eyetracker-calibration
-localizer1 --sub $SUBJECT
-...
+localizer1 --sub {subject}
+localizer2 --sub {subject}
+task1 --sub {subject}
+task2 --sub {subject}
 ```
 
+If you run:
 ```
-session-menu session-01.sh
+session-menu session-01.sh      # or session-01.txt
 ```
 
-Before the session starts, session-menu checks that every program can be found. The experimenter types
-the participant ID once, then starts each run from the menu, which shows a timer and which runs are
-done:
+session-menu checks that every program can be found before the session
+starts. It opens a text user interface. The experimenter types the
+participant ID once, then starts each run from the menu, which shows a
+timer and which runs are done:
 
-![session-menu running the session sub-001_sess-01 of project1: the first two programs are done (✓), the cursor is on the third](images/screenshot.png)
+![session-menu running session-01.sh for subject 001: runs 1 and 2 are done (✓), the cursor is on run 3](images/screenshot.png)
 
 The program works on Linux, Windows and macOS. Source code, releases and issues: <https://github.com/chrplr/session-menu>
 
@@ -105,7 +107,7 @@ The project folder may hold:
 |---|---|
 | `bin/` | Programs, looked up before the PATH (for `.txt` session files; a shell script does not search it) |
 | `sessions/` | Session files (`*.txt`, or shell scripts `*.sh`), listed by the menu to choose from |
-| `command_line_args.txt` | Arguments given to every program (optional; see below) |
+| `command_line_args.txt` | Arguments given to every program of a `.txt` session file (optional; see below) |
 | `.last_subject.txt` | The last subject ID, written by the menu |
 | `session-menu-log.csv` | The log of the runs, written by the menu (see below) |
 
@@ -120,12 +122,27 @@ current folder, then in the project folder.
 
 ## Session files
 
-There are two kinds of session files:
+There are two kinds of session files. In a `.txt` file, session-menu builds the command lines. In a
+`.sh` file, the shell builds them, and session-menu does not change your commands: it lists, checks,
+runs, logs and marks them.
 
-- **`*.txt`**: one command per line, without shell syntax. Start with these: the programs are looked
-  up in `bin/`, and they get the arguments of `command_line_args.txt` and the Subject ID (`{subject}`).
-- **`*.sh`**: shell scripts, as in the example above. Use them if you already have scripts, or need
-  variables and shell syntax. See [Session files that are shell scripts](#session-files-that-are-shell-scripts).
+| | `.txt` session file | `.sh` session file |
+|---|---|---|
+| Who builds the command lines | session-menu | the shell |
+| Programs of `bin/` | looked up before the PATH | not searched: write `bin/task.py` |
+| `command_line_args.txt` | added to every line | not used: [a per-PC file](#settings-that-differ-between-pcs) instead |
+| Subject ID | `{subject}`, and `$SUBJECT` in the environment | `$SUBJECT` |
+| Shell syntax (variables, pipes, `if`…) | no | yes |
+| Checked before the session | every program | the settings, and the first word of each command |
+| On Windows | as is (`.exe`, `.bat`, `.cmd`, `.py`) | needs Git Bash or similar |
+| Runs without the menu | no | yes (`bash session-01.sh`) |
+
+Start with `.txt` files if you are new to this, or if the session must run on Windows without Git Bash.
+Use `.sh` files if you already have scripts, or need shell syntax; see
+[Session files that are shell scripts](#session-files-that-are-shell-scripts).
+
+In both, if the file name starts with `sub-<ID>` (up to the first `_` or `.`), the Subject ID field is
+pre-filled with `<ID>`, as written (`sub-001` gives `001`).
 
 A `.txt` session file is an ordinary text file, with one command per line: a program, then its options.
 Blank lines and lines starting with `#` are ignored. The options are split as in a shell: quotes and
@@ -143,8 +160,6 @@ MEG-ARC -run 2
 - Each program is looked up first in `bin/`, then in the PATH.
 - A line starting with `!` is run as written: it does not get the arguments of
   `command_line_args.txt`. Use it for programs that would refuse them, such as `track` above.
-- If the file name starts with `sub-<ID>` (up to the first `_` or `.`), the Subject ID field is
-  pre-filled with `<ID>`, as written (`sub-001` gives `001`).
 
 Without a session file on the command line, the menu lists the `*.txt` and `*.sh` files of `sessions/`
 to choose from. If there are none, it lists every program of `bin/`, in alphabetical order.
@@ -206,7 +221,7 @@ uv run fmri-play --subject $SUBJECT --rig "$RIG" --run 2 \
   ```
 
   A program that an earlier entry creates would be refused, as it does not exist yet.
-- `command_line_args.txt` and `{subject}` do not apply: use variables, and `$SUBJECT`.
+- `command_line_args.txt` and `{subject}` do not apply: use variables (see below), and `$SUBJECT`.
 
 **Write the subject as `SUBJECT=${SUBJECT:-sub-01}`.** It takes the Subject ID of the menu, and `sub-01`
 when the script runs on its own. A plain `SUBJECT=sub-01` would replace the ID typed in the menu, and the
@@ -216,7 +231,30 @@ the entry `✗ exit 3`.
 The terminal shows each command with its values (`+ uv run fmri-play --subject 002 ...`). The log and
 `-print` have it as written in the script (`--subject $SUBJECT`).
 
+### Settings that differ between PCs
+
+The settings above `# runs` can load a file of each PC, kept next to the shared session files:
+
+```sh
+#!/bin/sh
+SUBJECT=${SUBJECT:-sub-01}
+. ./this-pc.sh || exit 1    # e.g. COMMON="-s $SUBJECT -d 1 -ttl parallel:/dev/parport1"
+
+# runs
+task1 $COMMON --run 1
+task2 $COMMON --run 1
+```
+
+The arguments stay visible in each command, and the script works the same without the menu. Keep
+`|| exit 1`: without it, `bash` goes on when `this-pc.sh` is missing, and the runs start without the
+PC's arguments. With it, the menu refuses the session. `./` makes the path relative to the project
+folder, where the settings run. `$COMMON` is split on blanks, so its values cannot contain any; with
+`bash`, an array (`COMMON=(-d 1 --name "my rig")`, then `"${COMMON[@]}"`) keeps them.
+
 ## Arguments common to every program
+
+For `.txt` session files only: a shell script builds its own command lines (see
+[Settings that differ between PCs](#settings-that-differ-between-pcs)).
 
 The words of `command_line_args.txt`, if the file exists, are inserted **right after the program** of
 every line, except the lines that start with `!`. They are split as the session lines, may span
